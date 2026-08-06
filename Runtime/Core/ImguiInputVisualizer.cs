@@ -13,10 +13,26 @@ namespace FairyGUI
     /// </summary>
     public sealed class ImguiInputVisualizer : MonoBehaviour, IStageInputVisualizer
     {
-        struct Ripple
+        /// <summary>
+        /// 一次按压。upTime &lt; 0 表示还按着 —— held 期间圆环不衰减、跟随光标, 抬起后才淡出。
+        /// 圆环因此表达"正按着"的状态, 而不是"某一帧按下过"的事件: 按住不抬 / 按住拖拽
+        /// 在中途截图里读得出来。
+        /// </summary>
+        struct PressMarker
         {
+            public int button;
             public Vector2 pos;
-            public float startTime;
+            public float upTime;
+        }
+
+        /// <summary>某一刻一个按压圆环的实际画法。BuildRing 算出来, 绘制与查询共用同一份。</summary>
+        public struct PressRing
+        {
+            public int button;
+            public Vector2 pos;
+            public bool held;      // 还按着: 半径固定、alpha 不掉、跟随光标
+            public float radius;   // 已含 ContentScale
+            public float alpha;
         }
 
         // 箭头指针轮廓, 24x24 视口坐标(左上原点, y 向下), 尖端在 (4.5, 3.5)。
@@ -34,7 +50,7 @@ namespace FairyGUI
 
         Vector2 _pointer;
         bool _hasPointer;
-        readonly List<Ripple> _ripples = new List<Ripple>();
+        readonly List<PressMarker> _presses = new List<PressMarker>();
         readonly List<UnityEngine.Touch> _touches = new List<UnityEngine.Touch>();
 
         Texture2D _white;
@@ -102,26 +118,51 @@ namespace FairyGUI
 
         // ---------------- IStageInputVisualizer ----------------
 
+        // held 的圆环跟着光标走 —— 按住拖拽时圆环留在按下点会读成"点了一下又移开"。
         public void OnPointerMove(Vector2 screenPos)
         {
             _pointer = screenPos;
             _hasPointer = true;
+
+            for (int i = 0; i < _presses.Count; i++)
+            {
+                if (_presses[i].upTime >= 0f) continue;   // 已抬起的钉在抬起点, 不跟随
+                PressMarker m = _presses[i];
+                m.pos = screenPos;
+                _presses[i] = m;
+            }
         }
 
         public void OnPointerDown(Vector2 screenPos, int button)
         {
             _pointer = screenPos;
             _hasPointer = true;
-            _ripples.Add(new Ripple { pos = screenPos, startTime = _clock.unscaledTime });
+            _presses.Add(new PressMarker
+            {
+                button = button,
+                pos = screenPos,
+                upTime = -1f
+            });
         }
 
+        // 没有配对 Down 的 Up 什么都不做 —— 凭空造一个 marker 就是画一个从没按下过的环。
         public void OnPointerUp(Vector2 screenPos, int button)
         {
             _pointer = screenPos;
             _hasPointer = true;
+
+            for (int i = _presses.Count - 1; i >= 0; i--)
+            {
+                if (_presses[i].button != button || _presses[i].upTime >= 0f) continue;
+                PressMarker m = _presses[i];
+                m.pos = screenPos;
+                m.upTime = _clock.unscaledTime;
+                _presses[i] = m;
+                return;
+            }
         }
 
-        // 触摸落指不叠加鼠标风格的按压圆环(pressColor/pressFadeSeconds) ——
+        // 触摸落指不叠加鼠标风格的按压圆环(pressColor/pressUpFadeSeconds) ——
         // 触摸点自己的可视化(DrawTouches: 半透明圆点 + 多指连线)已经够用, 叠两套显得乱。
         public void OnTouches(IList<UnityEngine.Touch> touches)
         {
@@ -134,8 +175,70 @@ namespace FairyGUI
         public void Clear()
         {
             _hasPointer = false;
-            _ripples.Clear();
+            _presses.Clear();
             _touches.Clear();
+        }
+
+        /// <summary>此刻还会被画出来的按压圆环数(held 的 + 还没淡完的)。</summary>
+        public int CountVisiblePressMarkers()
+        {
+            float now = _clock.unscaledTime;
+            int count = 0;
+            for (int i = 0; i < _presses.Count; i++)
+                if (IsVisible(_presses[i], now)) count++;
+            return count;
+        }
+
+        /// <summary>
+        /// 取该按键最近一个还画着的圆环, 内容与 OnGUI 这一刻画出来的一致。
+        /// EditMode 测试跑不到 OnGUI, 没有这个查询, 跟随/半径/淡出只能靠截图肉眼判读。
+        /// </summary>
+        public bool TryGetPressRing(int button, out PressRing ring)
+        {
+            float now = _clock.unscaledTime;
+            float scale = ContentScale();
+            for (int i = _presses.Count - 1; i >= 0; i--)
+            {
+                if (_presses[i].button != button || !IsVisible(_presses[i], now)) continue;
+                ring = BuildRing(_presses[i], now, scale);
+                return true;
+            }
+
+            ring = new PressRing();
+            return false;
+        }
+
+        bool IsVisible(PressMarker m, float now)
+        {
+            if (m.upTime < 0f) return true;                       // 按着就一直画
+            if (_style.pressUpFadeSeconds <= 0f) return false;     // 不淡出, 抬起即消失
+            return now - m.upTime < _style.pressUpFadeSeconds;
+        }
+
+        /// <summary>
+        /// held: 半径固定在 pressRingHoldRadius, alpha 不掉 —— 表达"正按着"。
+        /// 抬起后: 在 pressUpFadeSeconds 内半径从 hold 扩到 pressRingMaxRadius、alpha 掉到 0,
+        /// 也就是"松手弹开"。扩张属于抬起而非按下: 按下那一刻就扩完的话, 按住期间反而没有
+        /// 稳定形态可读。
+        /// </summary>
+        PressRing BuildRing(PressMarker m, float now, float scale)
+        {
+            PressRing ring;
+            ring.button = m.button;
+            ring.pos = m.pos;
+            ring.held = m.upTime < 0f;
+
+            if (ring.held)
+            {
+                ring.radius = _style.pressRingHoldRadius * scale;
+                ring.alpha = _style.pressColor.a;
+                return ring;
+            }
+
+            float t = Mathf.Clamp01((now - m.upTime) / _style.pressUpFadeSeconds);
+            ring.radius = Mathf.Lerp(_style.pressRingHoldRadius, _style.pressRingMaxRadius, t) * scale;
+            ring.alpha = _style.pressColor.a * (1f - t);
+            return ring;
         }
 
         public void Dispose()
@@ -160,27 +263,26 @@ namespace FairyGUI
 
             Color saved = GUI.color;
 
-            DrawRipples();
+            DrawPressMarkers();
             if (_hasPointer) DrawCursor(_pointer, _style.cursorColor);
             DrawTouches();
 
             GUI.color = saved;
         }
 
-        void DrawRipples()
+        /// <summary>半径与 alpha 的算法见 BuildRing。淡完的顺手从列表里摘掉(倒序遍历, 边画边删安全)。</summary>
+        void DrawPressMarkers()
         {
             float scale = ContentScale();
             float now = _clock.unscaledTime;
-            for (int i = _ripples.Count - 1; i >= 0; i--)
+            for (int i = _presses.Count - 1; i >= 0; i--)
             {
-                float age = now - _ripples[i].startTime;
-                if (age > _style.pressFadeSeconds) { _ripples.RemoveAt(i); continue; }
+                if (!IsVisible(_presses[i], now)) { _presses.RemoveAt(i); continue; }
 
-                float t = age / _style.pressFadeSeconds;
-                float radius = Mathf.Lerp(4f * scale, _style.pressRingMaxRadius * scale, t);
+                PressRing ring = BuildRing(_presses[i], now, scale);
                 Color c = _style.pressColor;
-                c.a *= 1f - t;
-                DrawRing(_ripples[i].pos, radius, c);
+                c.a = ring.alpha;
+                DrawRing(ring.pos, ring.radius, c);
             }
         }
 

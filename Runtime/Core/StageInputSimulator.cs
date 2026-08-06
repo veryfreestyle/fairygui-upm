@@ -148,7 +148,7 @@ namespace FairyGUI
         /// <summary>
         /// 清掉当前 visualizer(默认实现或外部换入的自定义实现)已画的标记, 不管开着还是关着。
         /// 兜底 _defaultVisualizer: DisableVisualizer() 之后 source.visualizer 是 null,
-        /// 但默认实现的 GameObject 与其内部状态(_pointer/_ripples/_touches)还活着, 若不清
+        /// 但默认实现的 GameObject 与其内部状态(_pointer/_presses/_touches)还活着, 若不清
         /// 下次 UseDefaultVisualizer() 重新打开时会先闪一下上一次会话的残留标记。
         /// 对两者都为 null 是 no-op —— 调用方不用自己先判空。
         /// </summary>

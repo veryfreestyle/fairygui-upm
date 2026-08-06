@@ -15,6 +15,9 @@ namespace FairyGUI
         readonly IFrameClock _clock;
         readonly int[] _downFrame = new int[3] { -1, -1, -1 };
         readonly int[] _upFrame = new int[3] { -1, -1, -1 };
+        // Down/Up 是单帧边沿, 读侧不需要"按住"这个状态; 记它只为 ResetAll 能给
+        // visualizer 补一次 Up —— 否则会话结束后 held 圆环会一直画着谎报"还按着"。
+        readonly bool[] _mouseHeld = new bool[3];
         readonly HashSet<KeyCode> _held = new HashSet<KeyCode>();
         readonly List<UnityEngine.Touch> _touches = new List<UnityEngine.Touch>();
         Vector2 _mousePos;
@@ -58,6 +61,7 @@ namespace FairyGUI
         {
             CheckButton(button);
             _downFrame[button] = _clock.frameCount;
+            _mouseHeld[button] = true;
             if (visualizer != null) visualizer.OnPointerDown(_mousePos, button);
         }
 
@@ -65,6 +69,7 @@ namespace FairyGUI
         {
             CheckButton(button);
             _upFrame[button] = _clock.frameCount;
+            _mouseHeld[button] = false;
             if (visualizer != null) visualizer.OnPointerUp(_mousePos, button);
         }
 
@@ -104,6 +109,14 @@ namespace FairyGUI
             {
                 _downFrame[i] = -1;
                 _upFrame[i] = -1;
+
+                // 只对还按着的键补推一次 Up: 标记不清(留到截图之后), 但 held 圆环要转入淡出,
+                // 否则它会继续画着, 而输入状态其实已经释放了。没有 held 键时一次都不推。
+                if (_mouseHeld[i])
+                {
+                    _mouseHeld[i] = false;
+                    if (visualizer != null) visualizer.OnPointerUp(_mousePos, i);
+                }
             }
             _held.Clear();
             _touches.Clear();

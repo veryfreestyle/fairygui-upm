@@ -30,6 +30,10 @@ namespace FairyGUI
 
     /// <summary>
     /// 默认实现的样式。只作用于 ImguiInputVisualizer, 不进 IStageInputVisualizer 接口。
+    ///
+    /// 按压圆环是"正按着"的状态而非"按下过"的事件: 按住期间半径固定在 pressRingHoldRadius、
+    /// 不掉 alpha、跟随光标; 抬起后才钉在抬起点, 在 pressUpFadeSeconds 内一边扩到
+    /// pressRingMaxRadius 一边淡出。这样"按下不抬"与"按住拖拽"在截图上读得出来。
     /// 必须可调: AI 靠截图判断, 红色光标画在红色 UI 上就是看不见。
     ///
     /// struct 不带字段初始化器 —— 要保持 Unity 2021.3 兼容, 不能用 C# 10 才支持的
@@ -46,8 +50,9 @@ namespace FairyGUI
         public float cursorBorderWidth;     // 像素, Crosshair / Dot / Arrow 通用
 
         public Color pressColor;
-        public float pressRingMaxRadius;
-        public float pressFadeSeconds;      // 要够跨一次截图往返
+        public float pressRingHoldRadius;   // 按住期间的固定半径(不扩不淡)
+        public float pressRingMaxRadius;    // 抬起后向外扩到的峰值半径
+        public float pressUpFadeSeconds;    // 抬起 -> 圆环扩到峰值并消失, 要够跨一次截图往返
 
         public float lineWidth;             // Crosshair 十字本身的线宽(不含描边)
 
@@ -69,8 +74,9 @@ namespace FairyGUI
                 cursorBorderWidth = 2f,
 
                 pressColor = new Color(1f, 1f, 1f, 0.95f),
-                pressRingMaxRadius = 40f,
-                pressFadeSeconds = 0.6f,
+                pressRingHoldRadius = 10f,
+                pressRingMaxRadius = 20f,
+                pressUpFadeSeconds = 0.6f,
 
                 lineWidth = 2f,
 
