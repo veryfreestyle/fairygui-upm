@@ -89,8 +89,14 @@ namespace FairyGUI
         }
 
         /// <summary>
-        /// 全部清空。异常 / 中断兜底, 会话进入与退出时各调一次。
+        /// 清空按键/触摸/组合串这些瞬时状态。异常 / 中断兜底, 会话进入与退出时各调一次。
         /// 不推 visualizer: 标记要留到截图之后, 只有显式 Clear() 才清。
+        ///
+        /// 鼠标位置故意不清零: 它代表"指针当前在哪", 跟按键/触摸这些"这一帧发生了什么"
+        /// 不是同一类状态, 清成 (0,0) 只是武断的哨兵值, 不代表指针真的移动到了那里。
+        /// 留着不清, MoveTo(target, steps) 这类"从当前位置移动"的调用在新会话开头才有意义
+        /// (从上一次真实设置的位置接着滑, 不会凭空跳到原点再滑回来)。只有显式 MoveMouse()
+        /// 才会改变它。
         /// </summary>
         public void ResetAll()
         {
@@ -101,7 +107,6 @@ namespace FairyGUI
             }
             _held.Clear();
             _touches.Clear();
-            _mousePos = Vector2.zero;
             _composition = string.Empty;
         }
 

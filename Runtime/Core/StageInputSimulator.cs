@@ -32,8 +32,16 @@ namespace FairyGUI
         /// 接管输入并返回一个 player。拿 player 的唯一途径就是这里 ——
         /// "忘了接管" 在编译期就不存在。
         /// 已 active 时抛 InvalidOperationException, 消息带上一个会话的 label。
+        ///
+        /// syncMousePositionFromCurrent: ScriptedInputSource.mousePosition 跨会话延续(见
+        /// ScriptedInputSource.ResetAll 的注释), 默认沿用上一次脚本会话记住的虚拟位置,
+        /// 让连续多个脚本会话之间的移动序列看起来连贯, 不会凭空跳到 (0,0) 再滑回来。
+        /// 但如果两次脚本会话之间夹了一段真实输入(真人真的动过鼠标), 这个"记忆"就是过时的
+        /// —— 库自己没法判断中途有没有发生这种情况, 需要调用方自己知道并显式传 true:
+        /// 这样会从接管前的 inputSource(通常是真实鼠标)读取当前位置来初始化, 丢弃脚本记忆。
         /// </summary>
-        public static StageInputPlayer Start(StageInputMode mode = StageInputMode.Mouse, string label = null)
+        public static StageInputPlayer Start(StageInputMode mode = StageInputMode.Mouse, string label = null,
+                                              bool syncMousePositionFromCurrent = false)
         {
             if (_current != null)
                 throw new InvalidOperationException(
@@ -43,7 +51,10 @@ namespace FairyGUI
             _prevInputSource = Stage.inputSource;
             _prevTouchScreen = Stage.touchScreen;
 
+            Vector2 syncPos = _prevInputSource.mousePosition;
+
             _source.ResetAll();
+            if (syncMousePositionFromCurrent) _source.MoveMouse(syncPos);
             Stage.inputSource = _source;
 
             // 先设模式(不触发 setter 副作用), 再显式复位。次序不能反:
@@ -103,10 +114,11 @@ namespace FairyGUI
         static ImguiInputVisualizer _defaultVisualizer;
 
         /// <summary>
-        /// 启用零资源的默认可视化。懒建一个 DontDestroyOnLoad 的 GameObject,
-        /// 不依赖 Stage 的 GameObject 生命周期。
+        /// 启用零资源的默认可视化, 同时是设置/更新样式的入口 —— 传 style 就把它应用到
+        /// 默认实现上, 哪怕默认可视化已经在用也能再调一次改样式(幂等, 不重建 GameObject)。
+        /// 懒建一个 DontDestroyOnLoad 的 GameObject, 不依赖 Stage 的 GameObject 生命周期。
         /// </summary>
-        public static void UseDefaultVisualizer(InputVisualStyle style = null)
+        public static void UseDefaultVisualizer(InputVisualStyle? style = null)
         {
             if (_defaultVisualizer == null)
             {
@@ -116,7 +128,7 @@ namespace FairyGUI
                 _defaultVisualizer = go.AddComponent<ImguiInputVisualizer>();
             }
 
-            if (style != null) _defaultVisualizer.style = style;
+            if (style.HasValue) _defaultVisualizer.style = style.Value;
             _defaultVisualizer.enabled = true;
             _source.visualizer = _defaultVisualizer;
         }
@@ -128,6 +140,15 @@ namespace FairyGUI
         public static void DisableVisualizer()
         {
             _source.visualizer = null;
+        }
+
+        /// <summary>
+        /// 清掉当前 visualizer(默认实现或外部换入的自定义实现)已画的标记, 不管开着还是关着。
+        /// 对 visualizer 为 null 是 no-op —— 调用方不用自己先判空。
+        /// </summary>
+        public static void ClearVisualizer()
+        {
+            if (_source.visualizer != null) _source.visualizer.Clear();
         }
 
         /// <summary>控件中心的屏幕坐标。</summary>
