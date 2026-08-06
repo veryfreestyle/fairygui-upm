@@ -113,7 +113,7 @@ namespace FairyGUI
                 Keyboard keyboard = Keyboard.current;
                 return keyboard != null && (keyboard.leftCtrlKey.isPressed || keyboard.rightCtrlKey.isPressed);
 #else
-                return Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+                return Stage.inputSource.GetKey(KeyCode.LeftControl) || Stage.inputSource.GetKey(KeyCode.RightControl);
 #endif
             }
         }
@@ -129,7 +129,7 @@ namespace FairyGUI
                 Keyboard keyboard = Keyboard.current;
                 return keyboard != null && (keyboard.leftShiftKey.isPressed || keyboard.rightShiftKey.isPressed);
 #else
-                return Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+                return Stage.inputSource.GetKey(KeyCode.LeftShift) || Stage.inputSource.GetKey(KeyCode.RightShift);
 #endif
             }
         }
@@ -145,7 +145,7 @@ namespace FairyGUI
                 Keyboard keyboard = Keyboard.current;
                 return keyboard != null && (keyboard.leftAltKey.isPressed || keyboard.rightAltKey.isPressed);
 #else
-                return Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
+                return Stage.inputSource.GetKey(KeyCode.LeftAlt) || Stage.inputSource.GetKey(KeyCode.RightAlt);
 #endif
             }
         }
@@ -164,7 +164,7 @@ namespace FairyGUI
                     Keyboard keyboard = Keyboard.current;
                     return keyboard != null && (keyboard.leftCommandKey.isPressed || keyboard.rightCommandKey.isPressed);
 #else
-                    return Input.GetKey(KeyCode.LeftCommand) || Input.GetKey(KeyCode.RightCommand);
+                    return Stage.inputSource.GetKey(KeyCode.LeftCommand) || Stage.inputSource.GetKey(KeyCode.RightCommand);
 #endif
                 }
                 else

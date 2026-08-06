@@ -1526,7 +1526,7 @@ namespace FairyGUI
                 if (Stage.keyboardInput)
                     return String.Empty;
 
-                return Input.compositionString;
+                return Stage.inputSource.compositionString;
             }
         }
 

@@ -233,7 +233,7 @@ namespace FairyGUI
 #if FAIRYGUI_INPUT_SYSTEM
                 touchScreen = Touchscreen.current != null;
 #else
-                touchScreen = Input.touchSupported;
+                touchScreen = inputSource.touchSupported;
 #endif
             }
 
@@ -865,9 +865,9 @@ namespace FairyGUI
                     Vector2 pos = uTouch.screenPosition;
                     int touchId = uTouch.touchId;
 #else
-                for (int i = 0; i < Input.touchCount; ++i)
+                for (int i = 0; i < inputSource.touchCount; ++i)
                 {
-                    Touch uTouch = Input.GetTouch(i);
+                    Touch uTouch = inputSource.GetTouch(i);
                     Vector2 pos = uTouch.position;
                     int touchId = uTouch.fingerId;
 #endif
@@ -913,7 +913,7 @@ namespace FairyGUI
                 if (mouse != null)
                     pos = mouse.position.ReadValue();
 #else
-                pos = Input.mousePosition;
+                pos = inputSource.mousePosition;
 #endif
                 pos.y = Screen.height - pos.y;
                 TouchInfo touch = _touches[0];
@@ -1016,7 +1016,7 @@ namespace FairyGUI
                         if (Touch.activeTouches.Count > 0)
                             touchScreen = true;
 #else
-                        if (Input.touchCount > 0)
+                        if (inputSource.touchCount > 0)
                             touchScreen = true;
 #endif
                     }
@@ -1052,9 +1052,9 @@ namespace FairyGUI
                         _touchPosition.y = _contentRect.height - _touchPosition.y;
                     }
 #else
-                    if (Input.touchCount > 0)
+                    if (inputSource.touchCount > 0)
                     {
-                        _touchPosition = Input.GetTouch(Input.touchCount - 1).position;
+                        _touchPosition = inputSource.GetTouch(inputSource.touchCount - 1).position;
                         _touchPosition.y = _contentRect.height - _touchPosition.y;
                     }
 #endif
@@ -1067,7 +1067,7 @@ namespace FairyGUI
                     if (mouse != null)
                         pos = mouse.position.ReadValue();
 #else
-                    pos = Input.mousePosition;
+                    pos = inputSource.mousePosition;
 #endif
                     if (pos.x >= 0 && pos.y >= 0) // 编辑器环境下坐标有时是负
                     {
@@ -1166,7 +1166,7 @@ namespace FairyGUI
 
             if (mouse.leftButton.wasPressedThisFrame || mouse.rightButton.wasPressedThisFrame || mouse.middleButton.wasPressedThisFrame)
 #else
-            if (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1) || Input.GetMouseButtonDown(2))
+            if (inputSource.GetMouseButtonDown(0) || inputSource.GetMouseButtonDown(1) || inputSource.GetMouseButtonDown(2))
 #endif
             {
                 if (!touch.began)
@@ -1176,7 +1176,7 @@ namespace FairyGUI
 #if FAIRYGUI_INPUT_SYSTEM
                     touch.button = mouse.middleButton.wasPressedThisFrame ? 2 : (mouse.rightButton.wasPressedThisFrame ? 1 : 0);
 #else
-                    touch.button = Input.GetMouseButtonDown(2) ? 2 : (Input.GetMouseButtonDown(1) ? 1 : 0);
+                    touch.button = inputSource.GetMouseButtonDown(2) ? 2 : (inputSource.GetMouseButtonDown(1) ? 1 : 0);
 #endif
                     SetFocus(touch.target);
 
@@ -1188,7 +1188,7 @@ namespace FairyGUI
 #if FAIRYGUI_INPUT_SYSTEM
             if (mouse.leftButton.wasReleasedThisFrame || mouse.rightButton.wasReleasedThisFrame || mouse.middleButton.wasReleasedThisFrame)
 #else
-            if (Input.GetMouseButtonUp(0) || Input.GetMouseButtonUp(1) || Input.GetMouseButtonUp(2))
+            if (inputSource.GetMouseButtonUp(0) || inputSource.GetMouseButtonUp(1) || inputSource.GetMouseButtonUp(2))
 #endif
             {
                 if (touch.began)
@@ -1204,7 +1204,7 @@ namespace FairyGUI
 #if FAIRYGUI_INPUT_SYSTEM
                         if (mouse.rightButton.wasReleasedThisFrame || mouse.middleButton.wasReleasedThisFrame)
 #else
-                        if (Input.GetMouseButtonUp(1) || Input.GetMouseButtonUp(2))
+                        if (inputSource.GetMouseButtonUp(1) || inputSource.GetMouseButtonUp(2))
 #endif
                             clickTarget.BubbleEvent("onRightClick", touch.evt);
                         else
@@ -1219,7 +1219,7 @@ namespace FairyGUI
 #if FAIRYGUI_INPUT_SYSTEM
             if (mouse.leftButton.wasReleasedThisFrame && _currentCursor != null)
 #else
-            if (Input.GetMouseButtonUp(0) && _currentCursor != null)
+            if (inputSource.GetMouseButtonUp(0) && _currentCursor != null)
 #endif
                 _ChangeCursor(_currentCursor);
         }
@@ -1230,9 +1230,9 @@ namespace FairyGUI
             foreach (Touch uTouch in Touch.activeTouches)
             {
 #else
-            for (int i = 0; i < Input.touchCount; i++)
+            for (int i = 0; i < inputSource.touchCount; i++)
             {
-                Touch uTouch = Input.GetTouch(i);
+                Touch uTouch = inputSource.GetTouch(i);
 #endif
 
                 if (uTouch.phase == TouchPhase.Stationary)
