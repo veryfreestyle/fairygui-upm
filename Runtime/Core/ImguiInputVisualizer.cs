@@ -83,11 +83,21 @@ namespace FairyGUI
 
         void OnDestroy()
         {
-            if (_white != null) Destroy(_white);
-            if (_ring != null) Destroy(_ring);
-            if (_dot != null) Destroy(_dot);
-            if (_arrow != null) Destroy(_arrow);
-            if (_touchDot != null) Destroy(_touchDot);
+            // _white 在 Awake() 里无条件生成, EditMode 下 AddComponent 也会触发 Awake ——
+            // 所以这里同 Dispose() 一样要按 Application.isPlaying 分流 Destroy/DestroyImmediate,
+            // 不能假设 OnDestroy 只会在 Play 模式下跑到。
+            DestroyTexture(_white);
+            DestroyTexture(_ring);
+            DestroyTexture(_dot);
+            DestroyTexture(_arrow);
+            DestroyTexture(_touchDot);
+        }
+
+        static void DestroyTexture(Texture2D tex)
+        {
+            if (tex == null) return;
+            if (Application.isPlaying) Destroy(tex);
+            else DestroyImmediate(tex);
         }
 
         // ---------------- IStageInputVisualizer ----------------
