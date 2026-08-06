@@ -136,19 +136,26 @@ namespace FairyGUI
         /// <summary>
         /// 关掉可视化推送。只 enabled = false 不 Destroy —— 标记要在会话结束后继续显示,
         /// 截图是另一次独立调用。GameObject 在 visualizer.Dispose() 时才销毁。
+        /// 只对默认实现设 enabled(外部换入的自定义 visualizer 没有这个概念, 停推送即可);
+        /// 不设的话默认实现的 OnGUI 会一直照旧绘制上一次的状态, 标记永远画在 Game View 上。
         /// </summary>
         public static void DisableVisualizer()
         {
             _source.visualizer = null;
+            if (_defaultVisualizer != null) _defaultVisualizer.enabled = false;
         }
 
         /// <summary>
         /// 清掉当前 visualizer(默认实现或外部换入的自定义实现)已画的标记, 不管开着还是关着。
-        /// 对 visualizer 为 null 是 no-op —— 调用方不用自己先判空。
+        /// 兜底 _defaultVisualizer: DisableVisualizer() 之后 source.visualizer 是 null,
+        /// 但默认实现的 GameObject 与其内部状态(_pointer/_ripples/_touches)还活着, 若不清
+        /// 下次 UseDefaultVisualizer() 重新打开时会先闪一下上一次会话的残留标记。
+        /// 对两者都为 null 是 no-op —— 调用方不用自己先判空。
         /// </summary>
         public static void ClearVisualizer()
         {
             if (_source.visualizer != null) _source.visualizer.Clear();
+            else if (_defaultVisualizer != null) _defaultVisualizer.Clear();
         }
 
         /// <summary>控件中心的屏幕坐标。</summary>

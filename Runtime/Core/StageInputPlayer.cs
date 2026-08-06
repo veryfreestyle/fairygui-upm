@@ -346,9 +346,17 @@ namespace FairyGUI
 
         IEnumerator SendKeyRoutine(KeyCode key, EventModifiers modifiers)
         {
+            // 只按住/释放这次调用自己按下的键: 若外层已有 HoldModifiers(Shift) 作用域,
+            // 这里再传 EventModifiers.Shift 时 Shift 已经是 true, 不该在本方法结束时被释放——
+            // 否则会在 using 作用域结束前把外层按住的修饰键提前放掉, 静默打断外层作用域。
             List<KeyCode> held = ModifierKeys(modifiers);
+            List<KeyCode> pressedHere = new List<KeyCode>(held.Count);
             for (int i = 0; i < held.Count; i++)
+            {
+                if (_source.GetKey(held[i])) continue;
                 _source.HoldKey(held[i]);
+                pressedHere.Add(held[i]);
+            }
 
             EventModifiers mods = CurrentModifiers(modifiers);
             QueueKeyEvents(EventType.KeyDown, key, mods);
@@ -357,8 +365,8 @@ namespace FairyGUI
             QueueKeyEvents(EventType.KeyUp, key, mods);
             yield return null;
 
-            for (int i = 0; i < held.Count; i++)
-                _source.ReleaseKey(held[i]);
+            for (int i = 0; i < pressedHere.Count; i++)
+                _source.ReleaseKey(pressedHere[i]);
             yield return null;
         }
 

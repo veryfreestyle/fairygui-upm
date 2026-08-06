@@ -39,7 +39,7 @@ namespace FairyGUI
 
         Texture2D _white;
         Texture2D _ring;
-        int _ringRadius = -1;
+        const int RingTextureSize = 64;   // 固定尺寸生成一次, 绘制时靠 Rect 缩放, 半径连续变化不重建贴图
 
         // Dot / Arrow 的颜色是烤进贴图的(不是靠 GUI.color 叠色), 缓存键要带上颜色与描边宽度。
         Texture2D _dot;
@@ -131,8 +131,15 @@ namespace FairyGUI
         public void Dispose()
         {
             Clear();
-            if (this != null && gameObject != null)
+            if (this == null || gameObject == null) return;
+
+            // Destroy() 在 EditMode 下会抛 "may not be called from edit mode"。
+            // UseDefaultVisualizer() 明确支持 EditMode 使用(懒建时按 Application.isPlaying
+            // 决定要不要 DontDestroyOnLoad), Dispose() 也要对称处理两种模式。
+            if (Application.isPlaying)
                 Destroy(gameObject);
+            else
+                DestroyImmediate(gameObject);
         }
 
         // ---------------- 绘制 ----------------
@@ -300,27 +307,30 @@ namespace FairyGUI
 
         void DrawRing(Vector2 screenPos, float radius, Color color)
         {
-            EnsureRing(Mathf.Max(2, Mathf.CeilToInt(radius)));
+            EnsureRing();
             GUI.color = color;
             GUI.DrawTexture(new Rect(screenPos.x - radius, ToGuiY(screenPos.y) - radius,
                                      radius * 2f, radius * 2f), _ring);
         }
 
-        // 只有半径分辨率变了才重生成。
-        void EnsureRing(int radius)
+        /// <summary>
+        /// 按压圆环的半径按 Lerp(4, pressRingMaxRadius, t) 连续变化, 若贴图按半径生成,
+        /// Mathf.CeilToInt(radius) 几乎每帧都变、缓存 key 跟着变, 衰减期间每帧都要
+        /// Destroy + new Texture2D + 一遍 O(size^2) 像素循环。改成固定尺寸只生成一次,
+        /// 缩放交给 GUI.DrawTexture 的目标 Rect —— 反正原来就是缩放绘制。
+        /// </summary>
+        void EnsureRing()
         {
-            if (_ring != null && _ringRadius == radius) return;
+            if (_ring != null) return;
 
-            if (_ring != null) Destroy(_ring);
-            _ringRadius = radius;
-
-            int size = radius * 2;
+            int size = RingTextureSize;
             _ring = new Texture2D(size, size, TextureFormat.RGBA32, false);
             _ring.hideFlags = HideFlags.HideAndDontSave;
 
             var pixels = new Color32[size * size];
+            float radius = size / 2f;
             float outer = radius;
-            float inner = Mathf.Max(1f, radius - 2f);
+            float inner = Mathf.Max(1f, radius - size * 0.08f);
             for (int y = 0; y < size; y++)
             {
                 for (int x = 0; x < size; x++)
