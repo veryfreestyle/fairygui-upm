@@ -315,5 +315,228 @@ namespace FairyGUI
             _source.ReleaseMouse(0);
             yield return null;
         }
+
+        // ---------------- 通道 B: IMGUI 事件 ----------------
+
+        /// <summary>
+        /// 一次真实按键在 IMGUI 里是一个还是两个 Event, 由 spec §8.2 #1 实测决定。
+        /// Combined: 一个 KeyDown 同时带 keyCode 与 character。
+        /// Split:    两个 KeyDown, 一个只带 keyCode, 一个只带 character, 同帧入队。
+        /// 两种都不改帧数。
+        /// </summary>
+        public static KeyEventStyle keyEventStyle = KeyEventStyle.Split;
+
+        /// <summary>
+        /// 按下 - 抬起 - 释放修饰键。帧数 3。
+        /// 两侧都喂: source.HoldKey 让 evt.ctrl 为真(InputEvent 读 GetKey),
+        /// Event.modifiers 让 evt.modifiers 为真(Stage.cs:954 抄自事件)。
+        /// 缺一个就是 "Ctrl+A 被当成没按修饰键的 A" 那个行为错误。
+        /// 释放修饰键必须比 KeyUp 晚一帧: InputEvent.ctrl 是惰性属性, 在派发那一刻才读 GetKey,
+        /// 而队列要到该帧 OnGUI 才排空。
+        /// </summary>
+        public IEnumerator SendKey(KeyCode key, EventModifiers modifiers = 0)
+        {
+            ThrowIfDisposed();
+            return SendKeyRoutine(key, modifiers);
+        }
+
+        IEnumerator SendKeyRoutine(KeyCode key, EventModifiers modifiers)
+        {
+            List<KeyCode> held = ModifierKeys(modifiers);
+            for (int i = 0; i < held.Count; i++)
+                _source.HoldKey(held[i]);
+
+            EventModifiers mods = CurrentModifiers(modifiers);
+            QueueKeyEvents(EventType.KeyDown, key, mods);
+            yield return null;
+
+            QueueKeyEvents(EventType.KeyUp, key, mods);
+            yield return null;
+
+            for (int i = 0; i < held.Count; i++)
+                _source.ReleaseKey(held[i]);
+            yield return null;
+        }
+
+        void QueueKeyEvents(EventType type, KeyCode key, EventModifiers mods)
+        {
+            char ch = DeriveCharacter(key, mods);
+
+            if (keyEventStyle == KeyEventStyle.Combined)
+            {
+                _sink.Queue(MakeKeyEvent(type, key, ch, mods));
+                return;
+            }
+
+            _sink.Queue(MakeKeyEvent(type, key, '\0', mods));
+            if (ch != '\0')
+                _sink.Queue(MakeKeyEvent(type, KeyCode.None, ch, mods));
+        }
+
+        static Event MakeKeyEvent(EventType type, KeyCode key, char character, EventModifiers mods)
+        {
+            Event e = new Event();
+            e.type = type;
+            e.keyCode = key;
+            e.character = character;
+            e.modifiers = mods;
+            return e;
+        }
+
+        /// <summary>
+        /// 逐字符投递。帧数 = text.Length * framesPerChar。
+        /// 只发 character(keyCode = None) —— 文本录入走的是 InputTextField.HandleTextInput,
+        /// 它读的是 evt.character。BMP 内的中文逐 char 发即可; 代理对与 emoji 本阶段不支持。
+        /// </summary>
+        public IEnumerator TypeText(string text, int framesPerChar = 1)
+        {
+            ThrowIfDisposed();
+            if (text == null) throw new ArgumentNullException("text");
+            if (framesPerChar < 1)
+                throw new ArgumentOutOfRangeException("framesPerChar", framesPerChar, "framesPerChar 至少为 1");
+            return TypeTextRoutine(text, framesPerChar);
+        }
+
+        IEnumerator TypeTextRoutine(string text, int framesPerChar)
+        {
+            EventModifiers mods = CurrentModifiers(0);
+            for (int i = 0; i < text.Length; i++)
+            {
+                _sink.Queue(MakeKeyEvent(EventType.KeyDown, KeyCode.None, text[i], mods));
+                for (int f = 0; f < framesPerChar; f++)
+                    yield return null;
+            }
+        }
+
+        /// <summary>
+        /// 滚轮。帧数 2: 第一帧把指针放到目标处让 LateUpdate 算出 _touchTarget,
+        /// 第二帧投事件, OnGUI 排空时 _touchTarget 仍然正确。
+        /// Touch 模式下必然无效(没手指时 _touchTarget 恒为 null, 事件被静默丢弃), 故限 Mouse。
+        /// </summary>
+        public IEnumerator Scroll(Vector2 screenPos, float delta, EventModifiers mods = 0)
+        {
+            ThrowIfDisposed();
+            RequireMouse("Scroll");
+            return ScrollRoutine(screenPos, delta, mods);
+        }
+
+        IEnumerator ScrollRoutine(Vector2 screenPos, float delta, EventModifiers mods)
+        {
+            _source.MoveMouse(screenPos);
+            yield return null;
+
+            Event e = new Event();
+            e.type = EventType.ScrollWheel;     // 必须先设 type: Event 内部 delta 与 mousePosition 共用存储
+            e.delta = new Vector2(0f, delta);
+            e.modifiers = CurrentModifiers(mods);
+            _sink.Queue(e);
+            yield return null;
+        }
+
+        /// <summary>
+        /// 在 using 作用域内按住修饰键。做成 IDisposable 而非 IEnumerator ——
+        /// _held 里残留一个 Ctrl 会让 evt.ctrl 永久为真, 是极难查的污染,
+        /// 同步作用域的 using 是第一道防线。
+        /// </summary>
+        public IDisposable HoldModifiers(EventModifiers mods)
+        {
+            ThrowIfDisposed();
+            List<KeyCode> keys = ModifierKeys(mods);
+            for (int i = 0; i < keys.Count; i++)
+                _source.HoldKey(keys[i]);
+            return new ModifierScope(_source, keys);
+        }
+
+        /// <summary>
+        /// 设置 IME 组合中态。FairyGUI 读 Stage.inputSource.compositionString。
+        /// 注意仅 Mouse 会话有效: InputTextField.compositionString 第一句是
+        /// if (Stage.keyboardInput) return String.Empty, 而真机 Touch 会话会把它置真。
+        /// </summary>
+        public void SetComposition(string text)
+        {
+            ThrowIfDisposed();
+            _source.SetComposition(text);
+        }
+
+        // ---------------- 修饰键映射 ----------------
+
+        static List<KeyCode> ModifierKeys(EventModifiers mods)
+        {
+            var keys = new List<KeyCode>(4);
+            if ((mods & EventModifiers.Control) != 0) keys.Add(KeyCode.LeftControl);
+            if ((mods & EventModifiers.Shift) != 0) keys.Add(KeyCode.LeftShift);
+            if ((mods & EventModifiers.Alt) != 0) keys.Add(KeyCode.LeftAlt);
+            if ((mods & EventModifiers.Command) != 0) keys.Add(KeyCode.LeftCommand);
+            return keys;
+        }
+
+        /// <summary>
+        /// 显式参数与当前按住状态的并集。不取并集的话, HoldModifiers(Shift) 期间调 SendKey(A)
+        /// 会产生镜像故障: evt.shift 为真(读 GetKey)而 evt.modifiers 为 0(抄自事件)。
+        /// </summary>
+        EventModifiers CurrentModifiers(EventModifiers explicitMods)
+        {
+            EventModifiers m = explicitMods;
+            if (_source.GetKey(KeyCode.LeftControl) || _source.GetKey(KeyCode.RightControl)) m |= EventModifiers.Control;
+            if (_source.GetKey(KeyCode.LeftShift) || _source.GetKey(KeyCode.RightShift)) m |= EventModifiers.Shift;
+            if (_source.GetKey(KeyCode.LeftAlt) || _source.GetKey(KeyCode.RightAlt)) m |= EventModifiers.Alt;
+            if (_source.GetKey(KeyCode.LeftCommand) || _source.GetKey(KeyCode.RightCommand)) m |= EventModifiers.Command;
+            return m;
+        }
+
+        /// <summary>
+        /// KeyCode 到字符的映射。按住 Control / Command 时返回 '\0' ——
+        /// 那些是命令键组合, 不应该往输入框塞字符。
+        /// </summary>
+        static char DeriveCharacter(KeyCode key, EventModifiers mods)
+        {
+            if ((mods & EventModifiers.Control) != 0 || (mods & EventModifiers.Command) != 0)
+                return '\0';
+
+            bool shift = (mods & EventModifiers.Shift) != 0;
+
+            if (key >= KeyCode.A && key <= KeyCode.Z)
+            {
+                char lower = (char)('a' + (key - KeyCode.A));
+                return shift ? char.ToUpperInvariant(lower) : lower;
+            }
+            if (key >= KeyCode.Alpha0 && key <= KeyCode.Alpha9 && !shift)
+                return (char)('0' + (key - KeyCode.Alpha0));
+
+            if (key == KeyCode.Space) return ' ';
+            if (key == KeyCode.Return || key == KeyCode.KeypadEnter) return '\n';
+            if (key == KeyCode.Tab) return '\t';
+            if (key == KeyCode.Backspace) return '\b';
+
+            return '\0';
+        }
+
+        sealed class ModifierScope : IDisposable
+        {
+            readonly ScriptedInputSource _source;
+            readonly List<KeyCode> _keys;
+            bool _released;
+
+            public ModifierScope(ScriptedInputSource source, List<KeyCode> keys)
+            {
+                _source = source;
+                _keys = keys;
+            }
+
+            public void Dispose()
+            {
+                if (_released) return;
+                _released = true;
+                for (int i = 0; i < _keys.Count; i++)
+                    _source.ReleaseKey(_keys[i]);
+            }
+        }
+    }
+
+    /// <summary>见 StageInputPlayer.keyEventStyle。</summary>
+    public enum KeyEventStyle
+    {
+        Combined,
+        Split
     }
 }
