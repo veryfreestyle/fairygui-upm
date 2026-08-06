@@ -20,4 +20,31 @@ namespace FairyGUI
         /// <summary>销毁自身持有的资源。与 StageInputPlayer.Dispose() 无关。</summary>
         void Dispose();
     }
+
+    public enum CursorShape
+    {
+        Crosshair,
+        Dot,
+        Ring
+    }
+
+    /// <summary>
+    /// 默认实现的样式。只作用于 ImguiInputVisualizer, 不进 IStageInputVisualizer 接口。
+    /// 必须可调: AI 靠截图判断, 红色光标画在红色 UI 上就是看不见。
+    /// </summary>
+    public sealed class InputVisualStyle
+    {
+        public CursorShape cursorShape = CursorShape.Crosshair;
+        public Color cursorColor = new Color(1f, 0.2f, 0.2f, 0.9f);
+        public float cursorSize = 24f;              // 像素
+
+        public Color pressColor = new Color(1f, 0.85f, 0.2f, 0.9f);
+        public float pressRingMaxRadius = 40f;
+        public float pressFadeSeconds = 2f;         // 要够跨一次截图往返
+
+        public bool showTrail = true;
+        public int trailLength = 32;
+        public Color trailColor = new Color(0.2f, 0.9f, 1f, 0.7f);
+        public float lineWidth = 2f;
+    }
 }

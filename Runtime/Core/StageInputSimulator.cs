@@ -100,6 +100,36 @@ namespace FairyGUI
             set { _source.visualizer = value; }
         }
 
+        static ImguiInputVisualizer _defaultVisualizer;
+
+        /// <summary>
+        /// 启用零资源的默认可视化。懒建一个 DontDestroyOnLoad 的 GameObject,
+        /// 不依赖 Stage 的 GameObject 生命周期。
+        /// </summary>
+        public static void UseDefaultVisualizer(InputVisualStyle style = null)
+        {
+            if (_defaultVisualizer == null)
+            {
+                var go = new GameObject("[FairyGUI InputVisualizer]");
+                go.hideFlags = HideFlags.HideAndDontSave;
+                if (Application.isPlaying) UnityEngine.Object.DontDestroyOnLoad(go);
+                _defaultVisualizer = go.AddComponent<ImguiInputVisualizer>();
+            }
+
+            if (style != null) _defaultVisualizer.style = style;
+            _defaultVisualizer.enabled = true;
+            _source.visualizer = _defaultVisualizer;
+        }
+
+        /// <summary>
+        /// 关掉可视化推送。只 enabled = false 不 Destroy —— 标记要在会话结束后继续显示,
+        /// 截图是另一次独立调用。GameObject 在 visualizer.Dispose() 时才销毁。
+        /// </summary>
+        public static void DisableVisualizer()
+        {
+            _source.visualizer = null;
+        }
+
         /// <summary>控件中心的屏幕坐标。</summary>
         public static Vector2 ScreenPointOf(GObject obj)
         {
