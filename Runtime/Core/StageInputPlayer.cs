@@ -51,6 +51,7 @@ namespace FairyGUI
         {
             if (_disposed) return;
             _disposed = true;
+            _fingers.Clear();
             if (_onSessionEnd != null) _onSessionEnd(this);
         }
 
@@ -129,10 +130,13 @@ namespace FairyGUI
             return StepRoutine(frames);
         }
 
-        static IEnumerator StepRoutine(int frames)
+        IEnumerator StepRoutine(int frames)
         {
             for (int i = 0; i < frames; i++)
+            {
                 yield return null;
+                if (_mode == StageInputMode.Touch) AdvanceTouchPhases();
+            }
         }
 
         // ---------------- 鼠标 ----------------
@@ -509,6 +513,270 @@ namespace FairyGUI
             if (key == KeyCode.Backspace) return '\b';
 
             return '\0';
+        }
+
+        // ---------------- 触摸 ----------------
+
+        sealed class Finger
+        {
+            public int id;
+            public Vector2 pos;
+            public TouchPhase phase;
+        }
+
+        readonly List<Finger> _fingers = new List<Finger>();
+        readonly List<UnityEngine.Touch> _touchBuffer = new List<UnityEngine.Touch>();
+
+        public int activeFingerCount { get { return _fingers.Count; } }
+
+        /// <summary>落指。相位置 Began —— FairyGUI 只在这个相位分配触摸槽位。超 5 指抛异常。</summary>
+        public void PressFinger(int fingerId, Vector2 screenPos)
+        {
+            ThrowIfDisposed();
+            RequireTouch("PressFinger");
+
+            if (_fingers.Count >= 5)
+                throw new InvalidOperationException("FairyGUI 只有 5 个触摸槽位, 第 6 根手指会被静默丢弃");
+            if (FindFinger(fingerId) != null)
+                throw new InvalidOperationException("fingerId " + fingerId + " 已经落指, 先 ReleaseFinger");
+
+            _fingers.Add(new Finger { id = fingerId, pos = screenPos, phase = TouchPhase.Began });
+            SyncTouches();
+        }
+
+        /// <summary>移动已落下的手指。未落指抛异常 —— 直接发 Moved 会被 FairyGUI 丢弃。</summary>
+        public void MoveFinger(int fingerId, Vector2 screenPos)
+        {
+            ThrowIfDisposed();
+            RequireTouch("MoveFinger");
+
+            Finger f = FindFinger(fingerId);
+            if (f == null)
+                throw new InvalidOperationException("fingerId " + fingerId + " 尚未落指, 先 PressFinger");
+
+            f.pos = screenPos;
+            // 本帧刚落指的手指保持 Began: 一根手指不可能同一帧既 Began 又 Moved。
+            if (f.phase != TouchPhase.Began)
+                f.phase = TouchPhase.Moved;
+            SyncTouches();
+        }
+
+        /// <summary>
+        /// 抬指。canceled: true 时发 Canceled 而非 Ended, 唯一差别是 FairyGUI 不派发 onClick
+        /// (onTouchEnd / rollOut / 槽位释放照常)。对应真机的系统打断: 来电、系统手势接管、
+        /// 超出平台触点上限。Ended / Canceled 这个二分在 iOS UITouch.Phase、Android
+        /// ACTION_UP / ACTION_CANCEL、W3C touchend / touchcancel 上一致。
+        /// </summary>
+        public void ReleaseFinger(int fingerId, bool canceled = false)
+        {
+            ThrowIfDisposed();
+            RequireTouch("ReleaseFinger");
+
+            Finger f = FindFinger(fingerId);
+            if (f == null)
+                throw new InvalidOperationException("fingerId " + fingerId + " 尚未落指");
+
+            f.phase = canceled ? TouchPhase.Canceled : TouchPhase.Ended;
+            SyncTouches();
+        }
+
+        Finger FindFinger(int fingerId)
+        {
+            for (int i = 0; i < _fingers.Count; i++)
+                if (_fingers[i].id == fingerId) return _fingers[i];
+            return null;
+        }
+
+        void SyncTouches()
+        {
+            _touchBuffer.Clear();
+            for (int i = 0; i < _fingers.Count; i++)
+            {
+                Finger f = _fingers[i];
+                _touchBuffer.Add(new UnityEngine.Touch
+                {
+                    fingerId = f.id,
+                    position = f.pos,
+                    phase = f.phase,
+                    tapCount = 1
+                });
+            }
+            _source.SetTouches(_touchBuffer);
+        }
+
+        /// <summary>
+        /// 帧末推进相位: Began / Moved 降级为 Stationary, Ended / Canceled 释放槽位。
+        /// Began 只能出现一帧, 否则 FairyGUI 会认为是新手指再走一次分配并重复 touch.Begin()。
+        /// </summary>
+        void AdvanceTouchPhases()
+        {
+            if (_fingers.Count == 0) return;
+
+            bool changed = false;
+            for (int i = _fingers.Count - 1; i >= 0; i--)
+            {
+                Finger f = _fingers[i];
+                if (f.phase == TouchPhase.Ended || f.phase == TouchPhase.Canceled)
+                {
+                    _fingers.RemoveAt(i);
+                    changed = true;
+                }
+                else if (f.phase != TouchPhase.Stationary)
+                {
+                    f.phase = TouchPhase.Stationary;
+                    changed = true;
+                }
+            }
+            if (changed) SyncTouches();
+        }
+
+        /// <summary>落指 - 保持 - 抬指。帧数 3。中间那帧同 Click, 为了 holdTime 不退化成 -1。</summary>
+        public IEnumerator Tap(Vector2 screenPos, int fingerId = 0)
+        {
+            ThrowIfDisposed();
+            RequireTouch("Tap");
+            return TapRoutine(screenPos, fingerId);
+        }
+
+        IEnumerator TapRoutine(Vector2 screenPos, int fingerId)
+        {
+            PressFinger(fingerId, screenPos);
+            yield return null;
+            AdvanceTouchPhases();
+
+            yield return null;
+            AdvanceTouchPhases();
+
+            ReleaseFinger(fingerId);
+            yield return null;
+            AdvanceTouchPhases();
+        }
+
+        /// <summary>单指拖拽。帧数 = 1 + holdFrames + steps + 1。</summary>
+        public IEnumerator TouchDrag(Vector2 from, Vector2 to, int steps,
+                                     int fingerId = 0, int holdFrames = 0)
+        {
+            ThrowIfDisposed();
+            RequireTouch("TouchDrag");
+            CheckFrames(holdFrames, "holdFrames");
+            CheckStepDisplacement(from, to, steps, "TouchDrag");
+            return TouchDragRoutine(from, to, steps, fingerId, holdFrames);
+        }
+
+        IEnumerator TouchDragRoutine(Vector2 from, Vector2 to, int steps, int fingerId, int holdFrames)
+        {
+            PressFinger(fingerId, from);
+            yield return null;
+            AdvanceTouchPhases();
+
+            for (int i = 0; i < holdFrames; i++)
+            {
+                yield return null;
+                AdvanceTouchPhases();
+            }
+
+            for (int i = 1; i <= steps; i++)
+            {
+                MoveFinger(fingerId, Vector2.Lerp(from, to, (float)i / steps));
+                yield return null;
+                AdvanceTouchPhases();
+            }
+
+            ReleaseFinger(fingerId);
+            yield return null;
+            AdvanceTouchPhases();
+        }
+
+        /// <summary>
+        /// 双指缩放 + 旋转。一个方法覆盖两者 —— 拆成 Pinch 和 Rotate 表达不了
+        /// "同时缩放加旋转", 而那正是真人双指操作的样子。帧数 = 1 + steps + 1。
+        ///
+        /// center 与 angle 都是屏幕坐标系。每帧:
+        ///   d = Lerp(fromDistance, toDistance, t);  a = Lerp(fromAngle, toAngle, t)
+        ///   off = (cos a, sin a) * (d / 2)
+        ///   finger0 = center - off;  finger1 = center + off
+        ///
+        /// 要触发 RotationGesture, toAngle 必须小于 fromAngle: stage 坐标 Y 向下,
+        /// 屏幕系角度递增到识别器的局部系里会变成负 rot, 而它的
+        /// if (!_started && rot > 5) 没有 Mathf.Abs。
+        /// 两端全相等(两指按住不动)合法, 跳过每帧位移校验。
+        /// </summary>
+        public IEnumerator TwoFingerTransform(Vector2 center,
+                                              float fromDistance, float toDistance,
+                                              float fromAngle, float toAngle,
+                                              int steps = 10,
+                                              int fingerId0 = 0, int fingerId1 = 1)
+        {
+            ThrowIfDisposed();
+            RequireTouch("TwoFingerTransform");
+
+            if (steps < 1)
+                throw new ArgumentOutOfRangeException("steps", steps, "TwoFingerTransform 的 steps 至少为 1");
+            if (fingerId0 == fingerId1)
+                throw new ArgumentException("两个 fingerId 不能相同", "fingerId1");
+            if (FindFinger(fingerId0) != null || FindFinger(fingerId1) != null)
+                throw new InvalidOperationException("fingerId " + fingerId0 + " 或 " + fingerId1 + " 已被占用");
+            if (_fingers.Count > 3)
+                throw new InvalidOperationException("触摸槽位不足以再落两根手指, 当前已占 " + _fingers.Count + " 个");
+
+            CheckTwoFingerDisplacement(fromDistance, toDistance, fromAngle, toAngle, steps);
+
+            return TwoFingerTransformRoutine(center, fromDistance, toDistance,
+                                             fromAngle, toAngle, steps, fingerId0, fingerId1);
+        }
+
+        IEnumerator TwoFingerTransformRoutine(Vector2 center,
+                                              float fromDistance, float toDistance,
+                                              float fromAngle, float toAngle,
+                                              int steps, int fingerId0, int fingerId1)
+        {
+            Vector2 off0 = OffsetAt(fromDistance, fromAngle);
+            PressFinger(fingerId0, center - off0);
+            PressFinger(fingerId1, center + off0);
+            yield return null;
+            AdvanceTouchPhases();
+
+            for (int i = 1; i <= steps; i++)
+            {
+                float t = (float)i / steps;
+                Vector2 off = OffsetAt(Mathf.Lerp(fromDistance, toDistance, t),
+                                       Mathf.Lerp(fromAngle, toAngle, t));
+                MoveFinger(fingerId0, center - off);
+                MoveFinger(fingerId1, center + off);
+                yield return null;
+                AdvanceTouchPhases();
+            }
+
+            ReleaseFinger(fingerId0);
+            ReleaseFinger(fingerId1);
+            yield return null;
+            AdvanceTouchPhases();
+        }
+
+        static Vector2 OffsetAt(float distance, float angleDegrees)
+        {
+            float rad = angleDegrees * Mathf.Deg2Rad;
+            return new Vector2(Mathf.Cos(rad), Mathf.Sin(rad)) * (distance / 2f);
+        }
+
+        /// <summary>
+        /// 「每帧位移」指单指位移: 径向 |Δd| / (2 · steps) 与旋转弧长
+        /// (d/2) · |Δangle| · π/180 / steps 的合成, 不是间距变化量(差 2 倍)。
+        /// </summary>
+        static void CheckTwoFingerDisplacement(float fromDistance, float toDistance,
+                                               float fromAngle, float toAngle, int steps)
+        {
+            float radial = Mathf.Abs(toDistance - fromDistance) / (2f * steps);
+            float meanRadius = (fromDistance + toDistance) / 4f;
+            float arc = meanRadius * Mathf.Abs(toAngle - fromAngle) * Mathf.Deg2Rad / steps;
+            float perFrame = Mathf.Sqrt(radial * radial + arc * arc);
+
+            if (perFrame == 0f) return;
+            if (perFrame < 1f)
+                throw new ArgumentException(
+                    "TwoFingerTransform: 每帧单指位移 " + perFrame.ToString("F3") + "px < 1px, "
+                    + "SwipeGesture 的 snapping 会把 delta 取整为 0。把 steps 调小",
+                    "steps");
         }
 
         sealed class ModifierScope : IDisposable
