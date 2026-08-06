@@ -25,13 +25,17 @@ namespace FairyGUI
             public float upTime;
         }
 
-        /// <summary>某一刻一个按压圆环的实际画法。BuildRing 算出来, 绘制与查询共用同一份。</summary>
+        /// <summary>
+        /// 某一刻一个按压圆环的画法。BuildRing 算出来, 绘制与查询共用同一份。
+        /// radius 是**样式空间**的半径(与 pressRingHoldRadius / pressRingMaxRadius 同一单位),
+        /// 不含 ContentScale —— 乘 scale 是绘制时的换算, 混进来会让这份数据依赖 GRoot 是否存在。
+        /// </summary>
         public struct PressRing
         {
             public int button;
             public Vector2 pos;
             public bool held;      // 还按着: 半径固定、alpha 不掉、跟随光标
-            public float radius;   // 已含 ContentScale
+            public float radius;
             public float alpha;
         }
 
@@ -196,11 +200,10 @@ namespace FairyGUI
         public bool TryGetPressRing(int button, out PressRing ring)
         {
             float now = _clock.unscaledTime;
-            float scale = ContentScale();
             for (int i = _presses.Count - 1; i >= 0; i--)
             {
                 if (_presses[i].button != button || !IsVisible(_presses[i], now)) continue;
-                ring = BuildRing(_presses[i], now, scale);
+                ring = BuildRing(_presses[i], now);
                 return true;
             }
 
@@ -221,7 +224,7 @@ namespace FairyGUI
         /// 也就是"松手弹开"。扩张属于抬起而非按下: 按下那一刻就扩完的话, 按住期间反而没有
         /// 稳定形态可读。
         /// </summary>
-        PressRing BuildRing(PressMarker m, float now, float scale)
+        PressRing BuildRing(PressMarker m, float now)
         {
             PressRing ring;
             ring.button = m.button;
@@ -230,13 +233,13 @@ namespace FairyGUI
 
             if (ring.held)
             {
-                ring.radius = _style.pressRingHoldRadius * scale;
+                ring.radius = _style.pressRingHoldRadius;
                 ring.alpha = _style.pressColor.a;
                 return ring;
             }
 
             float t = Mathf.Clamp01((now - m.upTime) / _style.pressUpFadeSeconds);
-            ring.radius = Mathf.Lerp(_style.pressRingHoldRadius, _style.pressRingMaxRadius, t) * scale;
+            ring.radius = Mathf.Lerp(_style.pressRingHoldRadius, _style.pressRingMaxRadius, t);
             ring.alpha = _style.pressColor.a * (1f - t);
             return ring;
         }
@@ -270,7 +273,10 @@ namespace FairyGUI
             GUI.color = saved;
         }
 
-        /// <summary>半径与 alpha 的算法见 BuildRing。淡完的顺手从列表里摘掉(倒序遍历, 边画边删安全)。</summary>
+        /// <summary>
+        /// 半径与 alpha 的算法见 BuildRing。ring.radius 是样式空间的, 画之前才乘 ContentScale。
+        /// 淡完的顺手从列表里摘掉(倒序遍历, 边画边删安全)。
+        /// </summary>
         void DrawPressMarkers()
         {
             float scale = ContentScale();
@@ -279,10 +285,10 @@ namespace FairyGUI
             {
                 if (!IsVisible(_presses[i], now)) { _presses.RemoveAt(i); continue; }
 
-                PressRing ring = BuildRing(_presses[i], now, scale);
+                PressRing ring = BuildRing(_presses[i], now);
                 Color c = _style.pressColor;
                 c.a = ring.alpha;
-                DrawRing(ring.pos, ring.radius, c);
+                DrawRing(ring.pos, ring.radius * scale, c);
             }
         }
 
