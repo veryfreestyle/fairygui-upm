@@ -28,6 +28,7 @@ namespace FairyGUI
         void OnGUI()
         {
             Stage.inst.HandleGUIEvents(Event.current);
+            Stage.inst.DrainQueuedGUIEvents();
         }
 
         void OnApplicationQuit()
