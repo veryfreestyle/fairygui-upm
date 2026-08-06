@@ -111,6 +111,8 @@ namespace FairyGUI
             set { _source.visualizer = value; }
         }
 
+        const string DefaultVisualizerName = "[FairyGUI InputVisualizer]";
+
         static ImguiInputVisualizer _defaultVisualizer;
 
         /// <summary>
@@ -122,15 +124,43 @@ namespace FairyGUI
         {
             if (_defaultVisualizer == null)
             {
-                var go = new GameObject("[FairyGUI InputVisualizer]");
+                var go = new GameObject(DefaultVisualizerName);
                 go.hideFlags = HideFlags.HideAndDontSave;
                 if (Application.isPlaying) UnityEngine.Object.DontDestroyOnLoad(go);
                 _defaultVisualizer = go.AddComponent<ImguiInputVisualizer>();
+
+                DestroyStaleDefaultVisualizers(_defaultVisualizer);
             }
 
             if (style.HasValue) _defaultVisualizer.style = style.Value;
             _defaultVisualizer.enabled = true;
             _source.visualizer = _defaultVisualizer;
+        }
+
+        /// <summary>
+        /// _defaultVisualizer 是静态字段, domain reload 会清掉它; 但它的 GameObject 是
+        /// HideAndDontSave, 跨 reload 存活。所以"静态为 null"不等于"实例不存在" ——
+        /// 不清理的话每次 reload 后都多一个, 旧实例继续在 OnGUI 里画自己最后已知的状态,
+        /// 截图上出现多个假光标, 而截图正是调用方的判读依据。
+        ///
+        /// 不复用旧实例、只销毁: EditMode 建的实例跨 reload 进了 PlayMode 之后不再收
+        /// OnGUI(状态还能读、就是没人画), 复用它等于可视化整体失灵。新建走的是与老代码
+        /// 同一条路径(DontDestroyOnLoad), 行为可预期。
+        ///
+        /// 只清名字对得上的(UseDefaultVisualizer 自己建的那种): 外部换入的自定义
+        /// ImguiInputVisualizer 实例归调用方所有, 不能替它做主销毁。
+        /// </summary>
+        static void DestroyStaleDefaultVisualizers(ImguiInputVisualizer keep)
+        {
+            ImguiInputVisualizer[] all = Resources.FindObjectsOfTypeAll<ImguiInputVisualizer>();
+            for (int i = 0; i < all.Length; i++)
+            {
+                if (all[i] == null || all[i] == keep) continue;
+                if (all[i].gameObject.name != DefaultVisualizerName) continue;
+
+                if (Application.isPlaying) UnityEngine.Object.Destroy(all[i].gameObject);
+                else UnityEngine.Object.DestroyImmediate(all[i].gameObject);
+            }
         }
 
         /// <summary>
