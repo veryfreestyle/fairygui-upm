@@ -339,16 +339,45 @@ namespace FairyGUI
             RequireMouse("Drag");
             CheckFrames(holdFrames, "holdFrames");
             CheckSteps(steps, "Drag");
-            return DragRoutine(from, to, steps, holdFrames);
+            return DragRoutine(from, to, steps, holdFrames, 0);
         }
 
-        IEnumerator DragRoutine(Vector2 from, Vector2 to, int steps, int holdFrames)
+        /// <summary>
+        /// 按下 - 停 holdBeforeFrames - 插值移动 - 停 holdAfterFrames - 抬起。
+        /// 帧数 = 1 + holdBeforeFrames + steps + holdAfterFrames + 1。
+        ///
+        /// holdAfterFrames 决定抬起前停不停, 而那决定 ScrollPane 有没有甩动惯性:
+        /// 停一下再松手无惯性(停在原地), 移动中直接松手带惯性(继续滑)。两种都是真实行为。
+        /// holdBeforeFrames 至少为 1 —— down 与第一个 move 相邻会让第一次 onTouchMove 的
+        /// holdTime 退化成 -1。这里抛而不是静默抬升: 帧驱动重载的帧数是文档化的确定值。
+        /// </summary>
+        public IEnumerator Drag(Vector2 from, Vector2 to, int steps,
+                                int holdBeforeFrames, int holdAfterFrames)
+        {
+            ThrowIfDisposed();
+            RequireMouse("Drag");
+            CheckHoldBeforeFrames(holdBeforeFrames);
+            CheckFrames(holdAfterFrames, "holdAfterFrames");
+            CheckSteps(steps, "Drag");
+            return DragRoutine(from, to, steps, holdBeforeFrames, holdAfterFrames);
+        }
+
+        static void CheckHoldBeforeFrames(int holdBeforeFrames)
+        {
+            if (holdBeforeFrames < 1)
+                throw new ArgumentOutOfRangeException("holdBeforeFrames", holdBeforeFrames,
+                    "holdBeforeFrames 至少为 1: down 与第一个 move 相邻会让第一次 onTouchMove 的 "
+                    + "holdTime 退化成 1f / Application.targetFrameRate (默认 -1)");
+        }
+
+        IEnumerator DragRoutine(Vector2 from, Vector2 to, int steps,
+                                int holdBeforeFrames, int holdAfterFrames)
         {
             _source.MoveMouse(from);
             _source.PressMouse(0);
             yield return null;
 
-            for (int i = 0; i < holdFrames; i++)
+            for (int i = 0; i < holdBeforeFrames; i++)
                 yield return null;
 
             for (int i = 1; i <= steps; i++)
@@ -356,6 +385,9 @@ namespace FairyGUI
                 _source.MoveMouse(Vector2.Lerp(from, to, (float)i / steps));
                 yield return null;
             }
+
+            for (int i = 0; i < holdAfterFrames; i++)
+                yield return null;
 
             _source.ReleaseMouse(0);
             yield return null;
@@ -367,20 +399,36 @@ namespace FairyGUI
             ThrowIfDisposed();
             RequireMouse("Drag");
             CheckFrames(holdFrames, "holdFrames");
-            if (path == null || path.Count == 0)
-                throw new ArgumentException("path 不能为空", "path");
-
-            var copy = new List<Vector2>(path);
-            return DragPathRoutine(from, copy, holdFrames);
+            CheckPath(path);
+            return DragPathRoutine(from, new List<Vector2>(path), holdFrames, 0);
         }
 
-        IEnumerator DragPathRoutine(Vector2 from, List<Vector2> path, int holdFrames)
+        /// <summary>显式轨迹 + 抬起前停顿。帧数 = 1 + holdBeforeFrames + path.Count + holdAfterFrames + 1。</summary>
+        public IEnumerator Drag(Vector2 from, IList<Vector2> path,
+                                int holdBeforeFrames, int holdAfterFrames)
+        {
+            ThrowIfDisposed();
+            RequireMouse("Drag");
+            CheckHoldBeforeFrames(holdBeforeFrames);
+            CheckFrames(holdAfterFrames, "holdAfterFrames");
+            CheckPath(path);
+            return DragPathRoutine(from, new List<Vector2>(path), holdBeforeFrames, holdAfterFrames);
+        }
+
+        static void CheckPath(IList<Vector2> path)
+        {
+            if (path == null || path.Count == 0)
+                throw new ArgumentException("path 不能为空", "path");
+        }
+
+        IEnumerator DragPathRoutine(Vector2 from, List<Vector2> path,
+                                    int holdBeforeFrames, int holdAfterFrames)
         {
             _source.MoveMouse(from);
             _source.PressMouse(0);
             yield return null;
 
-            for (int i = 0; i < holdFrames; i++)
+            for (int i = 0; i < holdBeforeFrames; i++)
                 yield return null;
 
             for (int i = 0; i < path.Count; i++)
@@ -388,6 +436,45 @@ namespace FairyGUI
                 _source.MoveMouse(path[i]);
                 yield return null;
             }
+
+            for (int i = 0; i < holdAfterFrames; i++)
+                yield return null;
+
+            _source.ReleaseMouse(0);
+            yield return null;
+        }
+
+        /// <summary>
+        /// 按速度拖拽。帧数取决于运行时帧率, 不是确定值。
+        /// holdBeforeMs 至少占一帧(理由同五参 Drag); holdAfterMs 无下限, 0 表示移动中直接松手,
+        /// ScrollPane 会带甩动惯性继续滑。
+        /// </summary>
+        public IEnumerator DragAtSpeed(Vector2 from, Vector2 to, float pixelsPerSecond,
+                                       float holdBeforeMs, float holdAfterMs)
+        {
+            ThrowIfDisposed();
+            RequireMouse("DragAtSpeed");
+            CheckSpeed(pixelsPerSecond, "DragAtSpeed");
+            CheckMs(holdBeforeMs, "holdBeforeMs");
+            CheckMs(holdAfterMs, "holdAfterMs");
+            return DragAtSpeedRoutine(from, to, pixelsPerSecond, holdBeforeMs, holdAfterMs);
+        }
+
+        IEnumerator DragAtSpeedRoutine(Vector2 from, Vector2 to, float pixelsPerSecond,
+                                       float holdBeforeMs, float holdAfterMs)
+        {
+            _source.MoveMouse(from);
+            _source.PressMouse(0);
+            yield return null;
+
+            IEnumerator before = WaitMsRoutine(holdBeforeMs, 1);
+            while (before.MoveNext()) yield return before.Current;
+
+            IEnumerator move = MoveAtSpeedRoutine(from, to, pixelsPerSecond);
+            while (move.MoveNext()) yield return move.Current;
+
+            IEnumerator after = WaitMsRoutine(holdAfterMs, 0);
+            while (after.MoveNext()) yield return after.Current;
 
             _source.ReleaseMouse(0);
             yield return null;
