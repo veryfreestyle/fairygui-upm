@@ -204,6 +204,59 @@ namespace FairyGUI
             }
         }
 
+        /// <summary>从当前位置按速度移动到 to。帧数取决于运行时帧率, 不是确定值。</summary>
+        public IEnumerator MoveAtSpeed(Vector2 to, float pixelsPerSecond)
+        {
+            ThrowIfDisposed();
+            RequireMouse("MoveAtSpeed");
+            CheckSpeed(pixelsPerSecond, "MoveAtSpeed");
+            return MoveAtSpeedRoutine(_source.mousePosition, to, pixelsPerSecond);
+        }
+
+        /// <summary>显式起点的按速度移动。</summary>
+        public IEnumerator MoveAtSpeed(Vector2 from, Vector2 to, float pixelsPerSecond)
+        {
+            ThrowIfDisposed();
+            RequireMouse("MoveAtSpeed");
+            CheckSpeed(pixelsPerSecond, "MoveAtSpeed");
+            return MoveAtSpeedRoutine(from, to, pixelsPerSecond);
+        }
+
+        static void CheckSpeed(float pixelsPerSecond, string method)
+        {
+            if (pixelsPerSecond <= 0f)
+                throw new ArgumentOutOfRangeException("pixelsPerSecond", pixelsPerSecond,
+                    method + " 的速度必须为正 (像素每秒)");
+        }
+
+        /// <summary>插值移动至少占这么多帧。低于 2 会撞 TouchInfo 的
+        /// frameCount - downFrame == 1 分支, holdTime 退化成 1f / targetFrameRate(默认 -1)。</summary>
+        const int MinInterpolationFrames = 2;
+
+        /// <summary>
+        /// 按墙钟插值。必须是绝对定位 Lerp 而非增量累加 (pos += v * deltaTime):
+        /// 绝对式在掉帧时只跳过中间点, 终点仍精确落在 to; 增量式的浮点误差会累积成过冲或差一点,
+        /// 且位移随 deltaTime 波动, 观感上就是速度抖动。
+        /// </summary>
+        IEnumerator MoveAtSpeedRoutine(Vector2 from, Vector2 to, float pixelsPerSecond)
+        {
+            float duration = Vector2.Distance(from, to) / pixelsPerSecond;
+            float start = _source.clock.unscaledTime;
+            int frames = 0;
+
+            while (true)
+            {
+                float t = duration > 0f
+                    ? Mathf.Clamp01((_source.clock.unscaledTime - start) / duration)
+                    : 1f;
+                _source.MoveMouse(Vector2.Lerp(from, to, t));
+                yield return null;
+                frames++;
+
+                if (t >= 1f && frames >= MinInterpolationFrames) yield break;
+            }
+        }
+
         /// <summary>
         /// 按下 - 保持 - 抬起。帧数 3。
         /// 中间那帧不可省: TouchInfo.End() 在 frameCount - downFrame == 1 时把 holdTime
