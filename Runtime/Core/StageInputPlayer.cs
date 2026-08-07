@@ -144,6 +144,14 @@ namespace FairyGUI
         /// 推帧直到墙钟走够 ms, 且至少 minFrames 帧。minFrames = 0 且 ms = 0 时一帧都不推。
         /// 读 _source.clock 而非 Time: UnityFrameClock 本来就是 Time 的透传,
         /// 走 clock 才能在 EditMode 用假时钟验。
+        ///
+        /// 循环体里推 Touch 相位, 而通道 B 的另外两条既有等待循环
+        /// (TypeTextRoutine 的逐帧 yield、SendKeyRoutine 的三帧 yield) 都没有这句 ——
+        /// 于是 Touch 模式下按着手指不放同时打字, TypeText 与 TypeTextAtRate 的副作用面并不一致。
+        /// 这不是本方法要对齐旧行为: 不推才是缺口。AdvanceTouchPhases 的注释写得很清楚,
+        /// Began 只能停留一帧, 多停一帧 FairyGUI 会把同一根手指当新手指再分配一次槽位。
+        /// TypeTextRoutine / SendKeyRoutine 那两处不推是既有序列方法冻结范围内的既有缺口,
+        /// 不在本 task 里改; 本方法保持推相位是对的一侧。
         /// </summary>
         IEnumerator WaitMsRoutine(float ms, int minFrames)
         {
