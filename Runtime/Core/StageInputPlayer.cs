@@ -123,6 +123,41 @@ namespace FairyGUI
             }
         }
 
+        /// <summary>
+        /// 按毫秒停顿。至少推一帧 —— 序列末尾少一次 yield, 最后一次注入就没人消费。
+        /// 帧数取决于运行时帧率, 不是确定值; 要断言帧数用 Step(int)。
+        /// </summary>
+        public IEnumerator StepMs(float ms)
+        {
+            ThrowIfDisposed();
+            CheckMs(ms, "ms");
+            return WaitMsRoutine(ms, 1);
+        }
+
+        static void CheckMs(float ms, string name)
+        {
+            if (ms < 0f)
+                throw new ArgumentOutOfRangeException(name, ms, name + " 不能为负");
+        }
+
+        /// <summary>
+        /// 推帧直到墙钟走够 ms, 且至少 minFrames 帧。minFrames = 0 且 ms = 0 时一帧都不推。
+        /// 读 _source.clock 而非 Time: UnityFrameClock 本来就是 Time 的透传,
+        /// 走 clock 才能在 EditMode 用假时钟验。
+        /// </summary>
+        IEnumerator WaitMsRoutine(float ms, int minFrames)
+        {
+            float seconds = ms / 1000f;
+            float start = _source.clock.unscaledTime;
+            int frames = 0;
+            while (frames < minFrames || _source.clock.unscaledTime - start < seconds)
+            {
+                yield return null;
+                frames++;
+                if (_mode == StageInputMode.Touch) AdvanceTouchPhases();
+            }
+        }
+
         // ---------------- 鼠标 ----------------
 
         /// <summary>移到指定位置。等价 MoveTo(pos, 1) —— 只要终点效果, 不测途经行为。帧数 1。</summary>
@@ -394,6 +429,29 @@ namespace FairyGUI
                 _sink.Queue(MakeKeyEvent(EventType.KeyDown, KeyCode.None, text[i], mods));
                 for (int f = 0; f < framesPerChar; f++)
                     yield return null;
+            }
+        }
+
+        /// <summary>
+        /// 按毫秒节奏逐字符投递。每个字符至少占一帧(同 TypeText 的 framesPerChar 下限)。
+        /// 帧数取决于运行时帧率, 不是确定值。
+        /// </summary>
+        public IEnumerator TypeTextAtRate(string text, float msPerChar)
+        {
+            ThrowIfDisposed();
+            if (text == null) throw new ArgumentNullException("text");
+            CheckMs(msPerChar, "msPerChar");
+            return TypeTextAtRateRoutine(text, msPerChar);
+        }
+
+        IEnumerator TypeTextAtRateRoutine(string text, float msPerChar)
+        {
+            EventModifiers mods = CurrentModifiers(0);
+            for (int i = 0; i < text.Length; i++)
+            {
+                _sink.Queue(MakeKeyEvent(EventType.KeyDown, KeyCode.None, text[i], mods));
+                IEnumerator wait = WaitMsRoutine(msPerChar, 1);
+                while (wait.MoveNext()) yield return wait.Current;
             }
         }
 
