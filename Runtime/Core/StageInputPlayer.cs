@@ -98,26 +98,10 @@ namespace FairyGUI
                 throw new ArgumentOutOfRangeException(name, frames, name + " 不能为负");
         }
 
-        /// <summary>
-        /// 每帧位移必须 ≥ 1 像素。SwipeGesture.__touchMove 的 snapping 默认为 true,
-        /// delta 取整后为 (0,0) 就整帧 return —— 200 像素分 300 帧走, 位移一点都累加不进去。
-        /// 总位移为 0(按住不动)是合法的, 跳过校验。
-        /// </summary>
-        internal static void CheckStepDisplacement(Vector2 from, Vector2 to, int steps, string method)
+        internal static void CheckSteps(int steps, string method)
         {
             if (steps < 1)
                 throw new ArgumentOutOfRangeException("steps", steps, method + " 的 steps 至少为 1");
-
-            float total = (to - from).magnitude;
-            if (total == 0f) return;
-
-            float perFrame = total / steps;
-            if (perFrame < 1f)
-                throw new ArgumentException(
-                    method + ": 每帧位移 " + perFrame.ToString("F3") + "px < 1px, "
-                    + "SwipeGesture 的 snapping 会把 delta 取整为 0, 整段位移静默丢失。"
-                    + "总位移 " + total.ToString("F1") + "px, steps 最多取 " + Mathf.FloorToInt(total),
-                    "steps");
         }
 
         // ---------------- 通用 ----------------
@@ -155,7 +139,7 @@ namespace FairyGUI
             ThrowIfDisposed();
             RequireMouse("MoveTo");
             Vector2 from = _source.mousePosition;
-            CheckStepDisplacement(from, to, steps, "MoveTo");
+            CheckSteps(steps, "MoveTo");
             return MoveToRoutine(from, to, steps);
         }
 
@@ -164,7 +148,7 @@ namespace FairyGUI
         {
             ThrowIfDisposed();
             RequireMouse("MoveTo");
-            CheckStepDisplacement(from, to, steps, "MoveTo");
+            CheckSteps(steps, "MoveTo");
             return MoveToRoutine(from, to, steps);
         }
 
@@ -258,7 +242,7 @@ namespace FairyGUI
             ThrowIfDisposed();
             RequireMouse("Drag");
             CheckFrames(holdFrames, "holdFrames");
-            CheckStepDisplacement(from, to, steps, "Drag");
+            CheckSteps(steps, "Drag");
             return DragRoutine(from, to, steps, holdFrames);
         }
 
@@ -289,13 +273,6 @@ namespace FairyGUI
             CheckFrames(holdFrames, "holdFrames");
             if (path == null || path.Count == 0)
                 throw new ArgumentException("path 不能为空", "path");
-
-            Vector2 prev = from;
-            for (int i = 0; i < path.Count; i++)
-            {
-                CheckStepDisplacement(prev, path[i], 1, "Drag(path) 第 " + i + " 段");
-                prev = path[i];
-            }
 
             var copy = new List<Vector2>(path);
             return DragPathRoutine(from, copy, holdFrames);
@@ -667,7 +644,7 @@ namespace FairyGUI
             ThrowIfDisposed();
             RequireTouch("TouchDrag");
             CheckFrames(holdFrames, "holdFrames");
-            CheckStepDisplacement(from, to, steps, "TouchDrag");
+            CheckSteps(steps, "TouchDrag");
             return TouchDragRoutine(from, to, steps, fingerId, holdFrames);
         }
 
@@ -727,8 +704,6 @@ namespace FairyGUI
             if (_fingers.Count > 3)
                 throw new InvalidOperationException("触摸槽位不足以再落两根手指, 当前已占 " + _fingers.Count + " 个");
 
-            CheckTwoFingerDisplacement(fromDistance, toDistance, fromAngle, toAngle, steps);
-
             return TwoFingerTransformRoutine(center, fromDistance, toDistance,
                                              fromAngle, toAngle, steps, fingerId0, fingerId1);
         }
@@ -765,26 +740,6 @@ namespace FairyGUI
         {
             float rad = angleDegrees * Mathf.Deg2Rad;
             return new Vector2(Mathf.Cos(rad), Mathf.Sin(rad)) * (distance / 2f);
-        }
-
-        /// <summary>
-        /// 「每帧位移」指单指位移: 径向 |Δd| / (2 · steps) 与旋转弧长
-        /// (d/2) · |Δangle| · π/180 / steps 的合成, 不是间距变化量(差 2 倍)。
-        /// </summary>
-        static void CheckTwoFingerDisplacement(float fromDistance, float toDistance,
-                                               float fromAngle, float toAngle, int steps)
-        {
-            float radial = Mathf.Abs(toDistance - fromDistance) / (2f * steps);
-            float meanRadius = (fromDistance + toDistance) / 4f;
-            float arc = meanRadius * Mathf.Abs(toAngle - fromAngle) * Mathf.Deg2Rad / steps;
-            float perFrame = Mathf.Sqrt(radial * radial + arc * arc);
-
-            if (perFrame == 0f) return;
-            if (perFrame < 1f)
-                throw new ArgumentException(
-                    "TwoFingerTransform: 每帧单指位移 " + perFrame.ToString("F3") + "px < 1px, "
-                    + "SwipeGesture 的 snapping 会把 delta 取整为 0。把 steps 调小",
-                    "steps");
         }
 
         sealed class ModifierScope : IDisposable
