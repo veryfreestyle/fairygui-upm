@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using UnityEngine;
 
 namespace FairyGUI
@@ -19,6 +20,15 @@ namespace FairyGUI
         static string _label;
         static IStageInputSource _prevInputSource;
         static bool _prevTouchScreen;
+
+        static bool _running;
+        static bool _cancelRequested;
+        static Action<StageInputRunResult, Exception> _onComplete;
+
+        // 每次 Run 自增。包装迭代器捕获当次的值, 在每个恢复点比对 ——
+        // 不相等就说明这条序列已经被作废(会话归还 / 新的 Run), 立刻 yield break。
+        // Timers.StartCoroutine 返回 void, 拿不到 Coroutine 句柄, 停不了协程, 只能这么作废。
+        static int _runGeneration;
 
         /// <summary>internal: 绕过 player 直接写状态会破坏单帧语义。</summary>
         internal static ScriptedInputSource source { get { return _source; } }
@@ -98,6 +108,11 @@ namespace FairyGUI
             Stage.SetTouchScreenRaw(_prevTouchScreen);
             if (Stage.isInitialized) Stage.inst.ResetInputState();
             Stage.inputSource = _prevInputSource;
+
+            _running = false;
+            _cancelRequested = false;
+            _onComplete = null;
+            _runGeneration++;
 
             _current = null;
             _label = null;
@@ -188,6 +203,103 @@ namespace FairyGUI
             else if (_defaultVisualizer != null) _defaultVisualizer.Clear();
         }
 
+        // ---------------- 序列执行 ----------------
+
+        /// <summary>当前是否有序列在执行。Cancel 的收尾阶段仍为 true。</summary>
+        public static bool isRunning { get { return _running; } }
+
+        /// <summary>
+        /// 在当前会话内执行一个序列。宿主是 FairyGUI 已有的 Timers 协程引擎 ——
+        /// 恢复点在所有 Update() 之后、LateUpdate() 之前, 正是 ScriptedInputSource
+        /// 单帧语义要求的那一侧(FGUI 在 StageEngine.LateUpdate 读)。
+        /// 手动 pump 的消费方自己挑时点极易挑错, 而挑错是静默丢输入, 文档守不住。
+        ///
+        /// onComplete 为 null 时结果被丢弃, 但异常仍会 LogError。
+        /// </summary>
+        public static void Run(IEnumerator sequence,
+                               Action<StageInputRunResult, Exception> onComplete = null)
+        {
+            if (sequence == null) throw new ArgumentNullException("sequence");
+
+            if (!Application.isPlaying)
+                throw new InvalidOperationException(
+                    "StageInputSimulator.Run 需要 Play 模式: EditMode 没有 player loop, 协程不会推进。"
+                    + "EditMode 下请自己 MoveNext() 推进 IEnumerator。");
+
+            if (_current == null)
+                throw new InvalidOperationException(
+                    "StageInputSimulator.Run 需要先 Start() 接管输入。未接管时指针注入完全无效"
+                    + "而键盘照常生效 —— 半生效比全不生效更难查。");
+
+            if (_running)
+                throw new InvalidOperationException(
+                    "StageInputSimulator 已有序列在执行 (会话 '"
+                    + (_label != null ? _label : "<未命名>") + "')。先等它完成, 或调 Cancel()。");
+
+            _running = true;
+            _cancelRequested = false;
+            _onComplete = onComplete;
+
+            int gen = ++_runGeneration;
+            // Timers.inst 的 getter 会按需 new GameObject, 所以只在过完四道门之后碰它。
+            Timers.inst.StartCoroutine(RunRoutine(gen, sequence));
+        }
+
+        static IEnumerator RunRoutine(int gen, IEnumerator sequence)
+        {
+            while (true)
+            {
+                if (gen != _runGeneration) yield break;
+
+                bool moved;
+                try
+                {
+                    moved = sequence.MoveNext();
+                }
+                catch (Exception ex)
+                {
+                    // 不包的话协程里的异常只会被 Unity 打一条 error log 然后静默终止,
+                    // 调用方永远等不到回调。
+                    Finish(StageInputRunResult.Faulted, ex);
+                    yield break;
+                }
+                if (!moved) break;
+
+                yield return sequence.Current;
+            }
+
+            if (gen != _runGeneration) yield break;
+
+            // 完成前额外推一帧。序列末尾通常是"写状态 + yield", 所以 MoveNext 返回 false 时
+            // 最后一次注入其实已被上一帧的 LateUpdate 消费 —— 但那依赖"每个序列末尾都有一次
+            // yield"这个将来容易破的不变量。而且调用方常在回调后立刻读 Stage.inst.touchTarget,
+            // 读早了拿到旧值。这一帧买断这两个风险, 代价约 16ms。
+            yield return null;
+            if (gen != _runGeneration) yield break;
+
+            Finish(StageInputRunResult.Completed, null);
+        }
+
+        static void Finish(StageInputRunResult result, Exception ex)
+        {
+            Action<StageInputRunResult, Exception> cb = _onComplete;
+            _onComplete = null;
+            _running = false;
+            _cancelRequested = false;
+
+            if (ex != null && cb == null)
+                Debug.LogError("StageInputSimulator.Run: 序列抛出异常且没有 onComplete 接收\n" + ex);
+
+            if (cb == null) return;
+
+            // 调用方回调里抛异常不能污染宿主状态。
+            try { cb(result, ex); }
+            catch (Exception cbEx)
+            {
+                Debug.LogError("StageInputSimulator.Run 的 onComplete 抛出异常\n" + cbEx);
+            }
+        }
+
         /// <summary>控件中心的屏幕坐标。</summary>
         public static Vector2 ScreenPointOf(GObject obj)
         {
@@ -205,5 +317,13 @@ namespace FairyGUI
             Vector2 stagePos = obj.LocalToGlobal(localPoint);
             return new Vector2(stagePos.x, Stage.inst.size.y - stagePos.y);
         }
+    }
+
+    /// <summary>StageInputSimulator.Run 的完成结果。</summary>
+    public enum StageInputRunResult
+    {
+        Completed,
+        Canceled,
+        Faulted
     }
 }
