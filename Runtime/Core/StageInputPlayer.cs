@@ -176,15 +176,19 @@ namespace FairyGUI
         ///
         /// 存在的理由: Cancel() 面向"有序列在跑"这一态, 对"没有序列在跑但状态还挂着"
         /// (比如 Run(player.Press(pos)) 跑完之后 _running 已是 false)是彻底的 no-op;
-        /// Dispose() 走 Restore() -> ResetAll(), 只把标志位清掉, 不写 _upFrame, FairyGUI
-        /// 永远读不到 GetMouseButtonUp, 业务在 onTouchBegin 里置的状态永远等不到 onTouchEnd。
-        /// 而 "press 之后不 release 就 end-session" 是设计内的用法(会话要让按下态活过命令边界),
-        /// 所以需要一条优雅收尾路径。
+        /// Dispose() 走 Restore() -> ResetAll(), 只把标志位清掉、把 _upFrame 清成 -1
+        /// (抹掉抬起帧, 不是补写一个当前帧), FairyGUI 永远读不到 GetMouseButtonUp,
+        /// 业务在 onTouchBegin 里置的状态永远等不到 onTouchEnd。而 "press 之后不 release
+        /// 就 end-session" 是设计内的用法(会话要让按下态活过命令边界), 所以需要一条
+        /// 优雅收尾路径。
         ///
         /// 释放什么不用猜, 按实际持有的释放: 鼠标读 _source.IsMouseHeld 逐个 ReleaseMouse;
-        /// 修饰键走 _source.ReleaseAllHeldKeys(); 触摸用本 player 自己的 ReleaseFinger 而非
-        /// _source.EndAllTouches() —— 直接操作 source 会让 _fingers 与 _source 的 touch 列表
-        /// 脱节, 下一帧 AdvanceTouchPhases() 就没法正常释放槽位。
+        /// 修饰键走 _source.ReleaseAllHeldKeys() —— 注意这是无条件释放全部修饰键, 若在
+        /// HoldModifiers(...) 的 using 作用域内调用, 会连同作用域按住的修饰键一起放掉:
+        /// 作用域对象持有的 _keys 与 source 就此脱节, 作用域内之后的 SendKey 不再带那个
+        /// 修饰键, 作用域 Dispose() 也变成静默 no-op; 触摸用本 player 自己的 ReleaseFinger
+        /// 而非 _source.EndAllTouches() —— 直接操作 source 会让 _fingers 与 _source 的
+        /// touch 列表脱节, 下一帧 AdvanceTouchPhases() 就没法正常释放槽位。
         ///
         /// 必须占一帧: ReleaseMouse(b) 只是写 _upFrame[b], FairyGUI 要在 LateUpdate 读到
         /// GetMouseButtonUp 才走 touch.End(), 同步返回的话这次释放没人消费。什么都没持有时
@@ -378,7 +382,10 @@ namespace FairyGUI
             yield return null;
         }
 
-        /// <summary>按下 - 保持 - 插值移动 - 抬起。帧数 = 1 + holdFrames + steps + 1。</summary>
+        /// <summary>
+        /// 按下 - 保持 - 插值移动 - 抬起。帧数 = 1 + holdFrames + steps + 1。左键固定;
+        /// 要按右键/中键或要控制抬起前的停顿, 用下面六参重载的 button。
+        /// </summary>
         public IEnumerator Drag(Vector2 from, Vector2 to, int steps, int holdFrames = 0)
         {
             ThrowIfDisposed();

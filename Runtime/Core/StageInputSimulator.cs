@@ -297,7 +297,9 @@ namespace FairyGUI
         }
 
         /// <summary>
-        /// 中止当前序列并收尾。不在执行中时是 no-op。
+        /// 中止当前序列并收尾。不在执行中时是 no-op —— 序列已经跑完(isRunning 已是 false)
+        /// 但控件停在按下态(比如刚 Run(player.Press(pos)))这种情形不算"执行中", 这里不管;
+        /// 要收那一态用 StageInputPlayer.ReleaseHeld()。
         /// 收尾是异步的, 占一帧 —— 释放只是写 _upFrame, FairyGUI 要在 LateUpdate 读到
         /// GetMouseButtonUp 才走 touch.End()。同步返回的话那次释放没人消费, 业务的
         /// 拖拽状态机会永远停在拖拽中。收尾期间 isRunning 仍为 true。
