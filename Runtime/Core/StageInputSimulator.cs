@@ -39,6 +39,16 @@ namespace FairyGUI
         public static string activeLabel { get { return _label; } }
 
         /// <summary>
+        /// 脚本源当前记的虚拟指针位置。跟 Stage.inputSource.mousePosition 不是一回事:
+        /// 未接管(active 为 false)时 Stage.inputSource 已经是 _prevInputSource(通常是
+        /// UnityInputSource, 直通真实鼠标), 读那个拿到的是操作者的物理指针。_source.mousePosition
+        /// 跨会话延续、不随 ResetAll 清零(见 ScriptedInputSource.ResetAll 的注释), 调用方要知道
+        /// "脚本会话上次把虚拟指针留在哪"(比如接管前先定位、或不带 syncMousePositionFromCurrent
+        /// 地 Start 之前想预判起点), 必须读这里, 经 Stage.inputSource 转一手会读错源。
+        /// </summary>
+        public static Vector2 mousePosition { get { return _source.mousePosition; } }
+
+        /// <summary>
         /// 接管输入并返回一个 player。拿 player 的唯一途径就是这里 ——
         /// "忘了接管" 在编译期就不存在。
         /// 已 active 时抛 InvalidOperationException, 消息带上一个会话的 label。
