@@ -22,7 +22,6 @@ namespace FairyGUI
         static bool _prevTouchScreen;
 
         static bool _running;
-        static bool _cancelRequested;
         static Action<StageInputRunResult, Exception> _onComplete;
 
         // 每次 Run 自增。包装迭代器捕获当次的值, 在每个恢复点比对 ——
@@ -110,7 +109,6 @@ namespace FairyGUI
             Stage.inputSource = _prevInputSource;
 
             _running = false;
-            _cancelRequested = false;
             _onComplete = null;
             _runGeneration++;
 
@@ -214,6 +212,15 @@ namespace FairyGUI
         /// 单帧语义要求的那一侧(FGUI 在 StageEngine.LateUpdate 读)。
         /// 手动 pump 的消费方自己挑时点极易挑错, 而挑错是静默丢输入, 文档守不住。
         ///
+        /// 注意这个"恢复点安全"的保证不覆盖第一段: StartCoroutine 会同步跑完协程体
+        /// 到第一个 yield 为止, 也就是序列里第一段写状态的代码(比如 Click 的
+        /// MoveMouse + PressMouse)发生在 Run() 被调用的那一刻、调用者的调用点上 ——
+        /// 不是在下一次协程恢复时。所以如果消费方在某一帧的 StageEngine.LateUpdate
+        /// 已经跑过之后才调 Run(), 这一段的按下会落在 LateUpdate 已读过的那一帧,
+        /// 等同于手动 pump 挑错时点的那种静默丢输入。当前所有调用方都在安全侧调用
+        /// (帧开始时, LateUpdate 之前), 但这个边界必须记在这里, 别让后续基于
+        /// "整段都在恢复点上"这个错误模型去算帧数。
+        ///
         /// onComplete 为 null 时结果被丢弃, 但异常仍会 LogError。
         /// </summary>
         public static void Run(IEnumerator sequence,
@@ -237,7 +244,6 @@ namespace FairyGUI
                     + (_label != null ? _label : "<未命名>") + "')。先等它完成, 或调 Cancel()。");
 
             _running = true;
-            _cancelRequested = false;
             _onComplete = onComplete;
 
             int gen = ++_runGeneration;
@@ -285,7 +291,6 @@ namespace FairyGUI
             Action<StageInputRunResult, Exception> cb = _onComplete;
             _onComplete = null;
             _running = false;
-            _cancelRequested = false;
 
             if (ex != null && cb == null)
                 Debug.LogError("StageInputSimulator.Run: 序列抛出异常且没有 onComplete 接收\n" + ex);
