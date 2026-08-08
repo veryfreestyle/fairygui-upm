@@ -22,6 +22,7 @@ namespace FairyGUI
         static bool _prevTouchScreen;
 
         static bool _running;
+        static bool _cancelRequested;
         static Action<StageInputRunResult, Exception> _onComplete;
 
         // 每次 Run 自增。包装迭代器捕获当次的值, 在每个恢复点比对 ——
@@ -109,6 +110,7 @@ namespace FairyGUI
             Stage.inputSource = _prevInputSource;
 
             _running = false;
+            _cancelRequested = false;
             _onComplete = null;
             _runGeneration++;
 
@@ -244,6 +246,7 @@ namespace FairyGUI
                     + (_label != null ? _label : "<未命名>") + "')。先等它完成, 或调 Cancel()。");
 
             _running = true;
+            _cancelRequested = false;
             _onComplete = onComplete;
 
             int gen = ++_runGeneration;
@@ -251,11 +254,42 @@ namespace FairyGUI
             Timers.inst.StartCoroutine(RunRoutine(gen, sequence));
         }
 
+        /// <summary>
+        /// 中止当前序列并收尾。不在执行中时是 no-op。
+        /// 收尾是异步的, 占一帧 —— 释放只是写 _upFrame, FairyGUI 要在 LateUpdate 读到
+        /// GetMouseButtonUp 才走 touch.End()。同步返回的话那次释放没人消费, 业务的
+        /// 拖拽状态机会永远停在拖拽中。收尾期间 isRunning 仍为 true。
+        ///
+        /// 实测(Cancel_MidDrag_DeliversTouchEndToBusiness): 一帧收尾就够, 不用再加一帧。
+        /// 原因是 Cancel() 本身从外部同步调用只置标志, 真正的收尾(ReleaseHeldInput)发生在
+        /// RunRoutine 下一次协程恢复 —— 那个恢复点本来就在本帧 Update() 之后、LateUpdate()
+        /// 之前(Timers 协程引擎的性质), 跟 ReleaseMouse 写的 _upFrame 要被同一帧的
+        /// StageEngine.LateUpdate 读到这件事天然对齐, 不需要额外等一帧。
+        /// </summary>
+        public static void Cancel()
+        {
+            if (!_running) return;
+            _cancelRequested = true;
+        }
+
+        /// <summary>释放实际持有的输入。释放什么不用猜, source 自己记着。</summary>
+        static void ReleaseHeldInput()
+        {
+            for (int b = 0; b < 3; b++)
+                if (_source.IsMouseHeld(b)) _source.ReleaseMouse(b);
+
+            _source.ReleaseAllHeldKeys();
+            _source.EndAllTouches();
+        }
+
         static IEnumerator RunRoutine(int gen, IEnumerator sequence)
         {
+            Exception fault = null;
+
             while (true)
             {
                 if (gen != _runGeneration) yield break;
+                if (_cancelRequested) break;
 
                 bool moved;
                 try
@@ -265,9 +299,10 @@ namespace FairyGUI
                 catch (Exception ex)
                 {
                     // 不包的话协程里的异常只会被 Unity 打一条 error log 然后静默终止,
-                    // 调用方永远等不到回调。
-                    Finish(StageInputRunResult.Faulted, ex);
-                    yield break;
+                    // 调用方永远等不到回调。异常发生时可能正按着键(比如 Drag 中途抛), 所以
+                    // 不在这里直接 Finish —— 落到循环外与 Cancel 走同一套收尾。
+                    fault = ex;
+                    break;
                 }
                 if (!moved) break;
 
@@ -275,6 +310,22 @@ namespace FairyGUI
             }
 
             if (gen != _runGeneration) yield break;
+
+            if (_cancelRequested || fault != null)
+            {
+                // 序列可能停在按下的半路(drag 拖到一半): 不释放的话 FGUI 侧那个控件
+                // 永久按下, 污染之后所有点击判定。释放什么不用猜, source 自己记着。
+                ReleaseHeldInput();
+                yield return null;                 // 让 LateUpdate 消费掉这次释放
+                if (gen != _runGeneration) yield break;
+
+                _source.ResetAll();
+                if (Stage.isInitialized) Stage.inst.ResetInputState();
+
+                Finish(fault != null ? StageInputRunResult.Faulted : StageInputRunResult.Canceled,
+                       fault);
+                yield break;
+            }
 
             // 完成前额外推一帧。序列末尾通常是"写状态 + yield", 所以 MoveNext 返回 false 时
             // 最后一次注入其实已被上一帧的 LateUpdate 消费 —— 但那依赖"每个序列末尾都有一次
@@ -291,6 +342,7 @@ namespace FairyGUI
             Action<StageInputRunResult, Exception> cb = _onComplete;
             _onComplete = null;
             _running = false;
+            _cancelRequested = false;
 
             if (ex != null && cb == null)
                 Debug.LogError("StageInputSimulator.Run: 序列抛出异常且没有 onComplete 接收\n" + ex);

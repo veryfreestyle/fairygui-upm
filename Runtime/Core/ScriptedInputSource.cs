@@ -93,6 +93,34 @@ namespace FairyGUI
             _composition = s != null ? s : string.Empty;
         }
 
+        // ---------------- 中断收尾用 ----------------
+        // 收尾要"释放实际持有的", 而不是猜。这三个口只给同程序集的收尾路径用。
+
+        internal bool IsMouseHeld(int button) { return _mouseHeld[button]; }
+
+        internal void ReleaseAllHeldKeys()
+        {
+            _held.Clear();
+        }
+
+        /// <summary>
+        /// 把还在的手指全部置 Ended。不是直接清空 —— 清空只是让 touchCount 归零,
+        /// FairyGUI 收不到 Ended 相位就不会走 touch.End(), 业务的 onTouchEnd 永远不来。
+        /// </summary>
+        internal void EndAllTouches()
+        {
+            if (_touches.Count == 0) return;
+
+            var ended = new List<UnityEngine.Touch>(_touches.Count);
+            for (int i = 0; i < _touches.Count; i++)
+            {
+                UnityEngine.Touch t = _touches[i];
+                t.phase = TouchPhase.Ended;
+                ended.Add(t);
+            }
+            SetTouches(ended);
+        }
+
         /// <summary>
         /// 清空按键/触摸/组合串这些瞬时状态。异常 / 中断兜底, 会话进入与退出时各调一次。
         /// 不推 visualizer: 标记要留到截图之后, 只有显式 Clear() 才清。
