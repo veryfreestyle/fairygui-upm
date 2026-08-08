@@ -107,16 +107,55 @@ namespace FairyGUI
             // 与 Start 同序: 先设模式, 再显式复位, 最后还原 inputSource。
             Stage.SetTouchScreenRaw(_prevTouchScreen);
             if (Stage.isInitialized) Stage.inst.ResetInputState();
-            Stage.inputSource = _prevInputSource;
 
-            _running = false;
-            _cancelRequested = false;
-            _onComplete = null;
-            _runGeneration++;
+            AbortRunningSequence();
+
+            Stage.inputSource = _prevInputSource;
 
             _current = null;
             _label = null;
             _prevInputSource = null;
+        }
+
+        /// <summary>
+        /// 归还会话时若还有序列在跑, 同步强清 —— 不走 Cancel 的正常收尾。
+        /// 正常收尾要等一帧, 而 Restore 返回后 inputSource 就已还原, 收尾写的释放没人读。
+        ///
+        /// 不抛异常要求先 Cancel(): using 块里断言抛出时, Dispose 跟着抛第二个异常会盖掉
+        /// 原始失败原因, 测试报告里只剩"序列还在跑不许 Dispose"。而 ForceReset 存在的
+        /// 理由就写着"没被 Dispose 是必然会发生的"。
+        ///
+        /// 代价是业务收不到 onTouchEnd —— 与 ResetInputState() 不派发 onRollOut 是同一类
+        /// 已知副作用, 只落在异常路径上。正常路径是 Cancel() → 等回调 → Dispose()。
+        ///
+        /// 不在这里同步驱动一次 Stage.inst.InternalUpdate(): 那会让同一帧可能跑两次
+        /// HandleEvents, 而 DrainQueuedGUIEvents 的重入、rollover 链重复计算、
+        /// TouchInfo.End() 被调两次这几处都没验证过。
+        /// </summary>
+        static void AbortRunningSequence()
+        {
+            if (!_running) return;
+
+            // 停不了协程(Timers.StartCoroutine 返回 void), 只能靠 generation 让它作废。
+            _runGeneration++;
+            _running = false;
+            _cancelRequested = false;
+
+            Action<StageInputRunResult, Exception> cb = _onComplete;
+            _onComplete = null;
+
+            // 回调在还原 inputSource 之前, 让回调里万一要读会话内状态还读得到。
+            if (cb != null)
+            {
+                try { cb(StageInputRunResult.Canceled, null); }
+                catch (Exception ex)
+                {
+                    Debug.LogError("StageInputSimulator 的 onComplete 抛出异常\n" + ex);
+                }
+            }
+
+            Debug.LogWarning("StageInputSimulator: 会话在序列运行中被释放, 未走正常收尾 —— "
+                             + "业务收不到 onTouchEnd。正常路径是 Cancel() 后等回调再 Dispose()。");
         }
 
         /// <summary>可视化。为 null 表示关(默认)。持有点在 source 上, 这里只是转写。</summary>
