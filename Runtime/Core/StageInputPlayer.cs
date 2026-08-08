@@ -14,8 +14,13 @@ namespace FairyGUI
 
     /// <summary>
     /// 输入序列编排。纯 IEnumerator, 不继承 MonoBehaviour ——
-    /// [UnityTest] 直接 yield return, 游戏 StartCoroutine, MCP 自己 MoveNext。
-    /// 所有序列帧数固定, 不含任何等待条件。
+    /// [UnityTest] 直接 yield return, 游戏里用 StartCoroutine。
+    /// 手动 pump(自己反复调 MoveNext 推进)的消费方改用 StageInputSimulator.Run ——
+    /// 手动 pump 必须自己挑对推进的时点, 挑错就静默丢一次输入, 这条约束写在文档里守不住,
+    /// 所以收进 Run 内建校验; Run 自身的时点约束见它的 XML 注释。
+    /// 帧数契约分两半: 帧驱动的重载(Click / Drag / Tap 等不带 AtSpeed/Ms/Rate 后缀的)
+    /// 帧数是文档化的确定值, 写在各方法的 summary 里; 时间驱动的重载
+    /// (StepMs / MoveAtSpeed / DragAtSpeed / TypeTextAtRate)帧数取决于运行时帧率, 不保证。
     /// </summary>
     public sealed partial class StageInputPlayer : IDisposable
     {

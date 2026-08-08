@@ -144,7 +144,9 @@ namespace FairyGUI
             Action<StageInputRunResult, Exception> cb = _onComplete;
             _onComplete = null;
 
-            // 回调在还原 inputSource 之前, 让回调里万一要读会话内状态还读得到。
+            // 回调在还原 inputSource 之前, 是为了让回调里 Stage.inputSource 还指向脚本源;
+            // 指针按下态与 touchTarget 此时已被 Restore() 在调用本方法之前执行的
+            // _source.ResetAll() / Stage.inst.ResetInputState() 清空, 回调里读不到。
             if (cb != null)
             {
                 try { cb(StageInputRunResult.Canceled, null); }
@@ -249,7 +251,8 @@ namespace FairyGUI
 
         /// <summary>
         /// 在当前会话内执行一个序列。宿主是 FairyGUI 已有的 Timers 协程引擎 ——
-        /// 恢复点在所有 Update() 之后、LateUpdate() 之前, 正是 ScriptedInputSource
+        /// 恢复点在所有 Update() 之后、LateUpdate() 之前(Unity 协程 yield return null
+        /// 的恢复时点, 与宿主是谁无关), 正是 ScriptedInputSource
         /// 单帧语义要求的那一侧(FGUI 在 StageEngine.LateUpdate 读)。
         /// 手动 pump 的消费方自己挑时点极易挑错, 而挑错是静默丢输入, 文档守不住。
         ///
@@ -302,8 +305,9 @@ namespace FairyGUI
         /// 实测(Cancel_MidDrag_DeliversTouchEndToBusiness): 一帧收尾就够, 不用再加一帧。
         /// 原因是 Cancel() 本身从外部同步调用只置标志, 真正的收尾(ReleaseHeldInput)发生在
         /// RunRoutine 下一次协程恢复 —— 那个恢复点本来就在本帧 Update() 之后、LateUpdate()
-        /// 之前(Timers 协程引擎的性质), 跟 ReleaseMouse 写的 _upFrame 要被同一帧的
-        /// StageEngine.LateUpdate 读到这件事天然对齐, 不需要额外等一帧。
+        /// 之前(Unity 协程 yield return null 的恢复时点, 与宿主是谁无关), 跟 ReleaseMouse
+        /// 写的 _upFrame 要被同一帧的 StageEngine.LateUpdate 读到这件事天然对齐,
+        /// 不需要额外等一帧。
         /// </summary>
         public static void Cancel()
         {
