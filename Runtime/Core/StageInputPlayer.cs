@@ -171,6 +171,47 @@ namespace FairyGUI
             }
         }
 
+        /// <summary>
+        /// 释放本会话当前持有的全部输入。帧数 1。
+        ///
+        /// 存在的理由: Cancel() 面向"有序列在跑"这一态, 对"没有序列在跑但状态还挂着"
+        /// (比如 Run(player.Press(pos)) 跑完之后 _running 已是 false)是彻底的 no-op;
+        /// Dispose() 走 Restore() -> ResetAll(), 只把标志位清掉, 不写 _upFrame, FairyGUI
+        /// 永远读不到 GetMouseButtonUp, 业务在 onTouchBegin 里置的状态永远等不到 onTouchEnd。
+        /// 而 "press 之后不 release 就 end-session" 是设计内的用法(会话要让按下态活过命令边界),
+        /// 所以需要一条优雅收尾路径。
+        ///
+        /// 释放什么不用猜, 按实际持有的释放: 鼠标读 _source.IsMouseHeld 逐个 ReleaseMouse;
+        /// 修饰键走 _source.ReleaseAllHeldKeys(); 触摸用本 player 自己的 ReleaseFinger 而非
+        /// _source.EndAllTouches() —— 直接操作 source 会让 _fingers 与 _source 的 touch 列表
+        /// 脱节, 下一帧 AdvanceTouchPhases() 就没法正常释放槽位。
+        ///
+        /// 必须占一帧: ReleaseMouse(b) 只是写 _upFrame[b], FairyGUI 要在 LateUpdate 读到
+        /// GetMouseButtonUp 才走 touch.End(), 同步返回的话这次释放没人消费。什么都没持有时
+        /// 也占一帧(与 Step(1) 一致, 帧数保持确定), 不因为无事可做就抛异常或跳过。
+        ///
+        /// 不限模式: 两种模式下都要正确工作, 是通用收尾, 不加 RequireMouse / RequireTouch。
+        /// </summary>
+        public IEnumerator ReleaseHeld()
+        {
+            ThrowIfDisposed();
+            return ReleaseHeldRoutine();
+        }
+
+        IEnumerator ReleaseHeldRoutine()
+        {
+            for (int b = 0; b < 3; b++)
+                if (_source.IsMouseHeld(b)) _source.ReleaseMouse(b);
+
+            _source.ReleaseAllHeldKeys();
+
+            for (int i = 0; i < _fingers.Count; i++)
+                ReleaseFinger(_fingers[i].id);
+
+            yield return null;
+            if (_mode == StageInputMode.Touch) AdvanceTouchPhases();
+        }
+
         // ---------------- 鼠标 ----------------
 
         /// <summary>移到指定位置。等价 MoveTo(pos, 1) —— 只要终点效果, 不测途经行为。帧数 1。</summary>
@@ -344,7 +385,7 @@ namespace FairyGUI
             RequireMouse("Drag");
             CheckFrames(holdFrames, "holdFrames");
             CheckSteps(steps, "Drag");
-            return DragRoutine(from, to, steps, holdFrames, 0);
+            return DragRoutine(from, to, steps, holdFrames, 0, 0);
         }
 
         /// <summary>
@@ -355,16 +396,20 @@ namespace FairyGUI
         /// 停一下再松手无惯性(停在原地), 移动中直接松手带惯性(继续滑)。两种都是真实行为。
         /// holdBeforeFrames 至少为 1 —— down 与第一个 move 相邻会让第一次 onTouchMove 的
         /// holdTime 退化成 -1。这里抛而不是静默抬升: 帧驱动重载的帧数是文档化的确定值。
+        ///
+        /// button 只加在这个最宽重载上: 四参便捷重载(holdFrames = 0)若同样加 button = 0,
+        /// Drag(a, b, 5, 3, 0) 会同时匹配"四参 + button"与"本重载", 编译器报歧义。
         /// </summary>
         public IEnumerator Drag(Vector2 from, Vector2 to, int steps,
-                                int holdBeforeFrames, int holdAfterFrames)
+                                int holdBeforeFrames, int holdAfterFrames, int button = 0)
         {
             ThrowIfDisposed();
             RequireMouse("Drag");
+            CheckButton(button);
             CheckHoldBeforeFrames(holdBeforeFrames);
             CheckFrames(holdAfterFrames, "holdAfterFrames");
             CheckSteps(steps, "Drag");
-            return DragRoutine(from, to, steps, holdBeforeFrames, holdAfterFrames);
+            return DragRoutine(from, to, steps, holdBeforeFrames, holdAfterFrames, button);
         }
 
         static void CheckHoldBeforeFrames(int holdBeforeFrames)
@@ -376,10 +421,10 @@ namespace FairyGUI
         }
 
         IEnumerator DragRoutine(Vector2 from, Vector2 to, int steps,
-                                int holdBeforeFrames, int holdAfterFrames)
+                                int holdBeforeFrames, int holdAfterFrames, int button)
         {
             _source.MoveMouse(from);
-            _source.PressMouse(0);
+            _source.PressMouse(button);
             yield return null;
 
             for (int i = 0; i < holdBeforeFrames; i++)
@@ -394,7 +439,7 @@ namespace FairyGUI
             for (int i = 0; i < holdAfterFrames; i++)
                 yield return null;
 
-            _source.ReleaseMouse(0);
+            _source.ReleaseMouse(button);
             yield return null;
         }
 
@@ -405,19 +450,24 @@ namespace FairyGUI
             RequireMouse("Drag");
             CheckFrames(holdFrames, "holdFrames");
             CheckPath(path);
-            return DragPathRoutine(from, new List<Vector2>(path), holdFrames, 0);
+            return DragPathRoutine(from, new List<Vector2>(path), holdFrames, 0, 0);
         }
 
-        /// <summary>显式轨迹 + 抬起前停顿。帧数 = 1 + holdBeforeFrames + path.Count + holdAfterFrames + 1。</summary>
+        /// <summary>
+        /// 显式轨迹 + 抬起前停顿。帧数 = 1 + holdBeforeFrames + path.Count + holdAfterFrames + 1。
+        /// button 只加在这个最宽重载上, 理由同五参 Drag: 四参便捷重载若同样加 button = 0 会与
+        /// 本重载在调用点产生歧义。
+        /// </summary>
         public IEnumerator Drag(Vector2 from, IList<Vector2> path,
-                                int holdBeforeFrames, int holdAfterFrames)
+                                int holdBeforeFrames, int holdAfterFrames, int button = 0)
         {
             ThrowIfDisposed();
             RequireMouse("Drag");
+            CheckButton(button);
             CheckHoldBeforeFrames(holdBeforeFrames);
             CheckFrames(holdAfterFrames, "holdAfterFrames");
             CheckPath(path);
-            return DragPathRoutine(from, new List<Vector2>(path), holdBeforeFrames, holdAfterFrames);
+            return DragPathRoutine(from, new List<Vector2>(path), holdBeforeFrames, holdAfterFrames, button);
         }
 
         static void CheckPath(IList<Vector2> path)
@@ -427,10 +477,10 @@ namespace FairyGUI
         }
 
         IEnumerator DragPathRoutine(Vector2 from, List<Vector2> path,
-                                    int holdBeforeFrames, int holdAfterFrames)
+                                    int holdBeforeFrames, int holdAfterFrames, int button)
         {
             _source.MoveMouse(from);
-            _source.PressMouse(0);
+            _source.PressMouse(button);
             yield return null;
 
             for (int i = 0; i < holdBeforeFrames; i++)
@@ -445,7 +495,7 @@ namespace FairyGUI
             for (int i = 0; i < holdAfterFrames; i++)
                 yield return null;
 
-            _source.ReleaseMouse(0);
+            _source.ReleaseMouse(button);
             yield return null;
         }
 
@@ -453,23 +503,25 @@ namespace FairyGUI
         /// 按速度拖拽。帧数取决于运行时帧率, 不是确定值。
         /// holdBeforeMs 至少占一帧(理由同五参 Drag); holdAfterMs 无下限, 0 表示移动中直接松手,
         /// ScrollPane 会带甩动惯性继续滑。
+        /// DragAtSpeed 只有这一个重载(没有与之撞歧义的便捷版本), button = 0 直接加在这里。
         /// </summary>
         public IEnumerator DragAtSpeed(Vector2 from, Vector2 to, float pixelsPerSecond,
-                                       float holdBeforeMs, float holdAfterMs)
+                                       float holdBeforeMs, float holdAfterMs, int button = 0)
         {
             ThrowIfDisposed();
             RequireMouse("DragAtSpeed");
+            CheckButton(button);
             CheckSpeed(pixelsPerSecond, "DragAtSpeed");
             CheckMs(holdBeforeMs, "holdBeforeMs");
             CheckMs(holdAfterMs, "holdAfterMs");
-            return DragAtSpeedRoutine(from, to, pixelsPerSecond, holdBeforeMs, holdAfterMs);
+            return DragAtSpeedRoutine(from, to, pixelsPerSecond, holdBeforeMs, holdAfterMs, button);
         }
 
         IEnumerator DragAtSpeedRoutine(Vector2 from, Vector2 to, float pixelsPerSecond,
-                                       float holdBeforeMs, float holdAfterMs)
+                                       float holdBeforeMs, float holdAfterMs, int button)
         {
             _source.MoveMouse(from);
-            _source.PressMouse(0);
+            _source.PressMouse(button);
             yield return null;
 
             IEnumerator before = WaitMsRoutine(holdBeforeMs, 1);
@@ -481,7 +533,7 @@ namespace FairyGUI
             IEnumerator after = WaitMsRoutine(holdAfterMs, 0);
             while (after.MoveNext()) yield return after.Current;
 
-            _source.ReleaseMouse(0);
+            _source.ReleaseMouse(button);
             yield return null;
         }
 
