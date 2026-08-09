@@ -746,6 +746,13 @@ namespace FairyGUI
         /// <summary>
         /// KeyCode 到字符的映射。按住 Control / Command 时返回 '\0' ——
         /// 那些是命令键组合, 不应该往输入框塞字符。
+        ///
+        /// Backspace 也返回 '\0', 尽管 '\b' 才是它的 ASCII 字符: InputTextField.OnKeyDown
+        /// 先按 keyCode 走 case KeyCode.Backspace 的 ReplaceSelection(null) 删掉选区, 然后
+        /// 无条件往下走到 `char c = evt.character; if (c != 0) HandleTextInput(c);` ——
+        /// HandleTextInput 只滤掉 27 / 单行下的 '\n' 与 '\t', 不滤 '\b', 于是同一次按键
+        /// 既删了字符又把一个字面 '\b' 插进文本。实测 "abc" 上按一次 Backspace 得到
+        /// "ab\b"。KeyCode.Delete 没有这个问题, 因为它本来就落到下面的 return '\0'。
         /// </summary>
         static char DeriveCharacter(KeyCode key, EventModifiers mods)
         {
@@ -765,7 +772,6 @@ namespace FairyGUI
             if (key == KeyCode.Space) return ' ';
             if (key == KeyCode.Return || key == KeyCode.KeypadEnter) return '\n';
             if (key == KeyCode.Tab) return '\t';
-            if (key == KeyCode.Backspace) return '\b';
 
             return '\0';
         }
