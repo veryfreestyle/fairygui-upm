@@ -40,6 +40,11 @@ namespace FairyGUI
     /// struct 无参构造。默认值都在 Default() 里给; 想部分覆盖默认值, 从 Default()
     /// 起手改字段, 不要用 new InputVisualStyle { ... } 对象初始化器,
     /// 否则没写到的字段会是类型默认值(颜色是全透明黑, 尺寸是 0)。
+    ///
+    /// 尺寸字段是**设计分辨率单位**(绘制时乘 ContentScale = GRoot.scale.x 换成屏幕像素),
+    /// 默认那批数值按 1136x640 调好。设计分辨率越大, 同一数值画出来相对越小 —— 所以
+    /// Default() 收实际设计分辨率, 把尺寸字段按 min(w/1136, h/640) 相对基准缩放,
+    /// 换分辨率也保持标记的相对大小不变。缩放只作用于尺寸, 不动颜色/时长/开关。
     /// </summary>
     public struct InputVisualStyle
     {
@@ -63,28 +68,32 @@ namespace FairyGUI
         public Color touchConnectorColor;
         public float touchConnectorWidth;
 
-        public static InputVisualStyle Default()
+        public static InputVisualStyle Default(int designWidth = 1136, int designHeight = 640)
         {
+            // 尺寸基准是 1136x640; 换设计分辨率时按较小的那个维度比例缩放(与
+            // UIContentScaler 默认的 MatchWidthOrHeight 一致), 异形宽高比下标记不被撑过大。
+            float s = Mathf.Min(designWidth / 1136f, designHeight / 640f);
+
             return new InputVisualStyle
             {
                 cursorShape = CursorShape.Arrow,
                 cursorColor = Color.white,
                 cursorBorderColor = Color.black,
-                cursorSize = 32f,
-                cursorBorderWidth = 2f,
+                cursorSize = 32f * s,
+                cursorBorderWidth = 2f * s,
 
                 pressColor = new Color(0.1020f, 0.8745f, 0.9020f, 0.95f),
-                pressRingHoldRadius = 10f,
-                pressRingMaxRadius = 20f,
+                pressRingHoldRadius = 10f * s,
+                pressRingMaxRadius = 20f * s,
                 pressUpFadeSeconds = 0.5f,
 
-                lineWidth = 2f,
+                lineWidth = 2f * s,
 
                 touchColor = new Color(0.3f, 0.7f, 1f, 0.8f),
-                touchRadius = 12f,
+                touchRadius = 12f * s,
                 showTouchConnectors = true,
                 touchConnectorColor = new Color(0.3f, 0.7f, 1f, 0.6f),
-                touchConnectorWidth = 3f
+                touchConnectorWidth = 3f * s
             };
         }
     }
