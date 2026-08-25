@@ -65,8 +65,8 @@ namespace FairyGUI
         public Color touchColor;              // 触摸点(半透明实心圆)填充色
         public float touchRadius;             // 触摸点半径, 像素
         public bool showTouchConnectors;      // 多指(≥2)时要不要在触点之间连线, 常见捏合/旋转手势的可视化习惯
-        public Color touchConnectorColor;
-        public float touchConnectorWidth;
+        public Color touchConnectorColor;     // 多指连线颜色
+        public float touchConnectorWidth;     // 多指连线宽度, 像素
 
         public static InputVisualStyle Default(int designWidth = 1136, int designHeight = 640)
         {
@@ -80,20 +80,20 @@ namespace FairyGUI
                 cursorColor = Color.white,
                 cursorBorderColor = Color.black,
                 cursorSize = 32f * s,
-                cursorBorderWidth = 2f * s,
+                cursorBorderWidth = 2f,
 
                 pressColor = new Color(0.1020f, 0.8745f, 0.9020f, 0.95f),
                 pressRingHoldRadius = 10f * s,
                 pressRingMaxRadius = 20f * s,
                 pressUpFadeSeconds = 0.5f,
 
-                lineWidth = 2f * s,
+                lineWidth = 2f,
 
                 touchColor = new Color(0.3f, 0.7f, 1f, 0.8f),
                 touchRadius = 12f * s,
                 showTouchConnectors = true,
                 touchConnectorColor = new Color(0.3f, 0.7f, 1f, 0.6f),
-                touchConnectorWidth = 3f * s
+                touchConnectorWidth = 3f
             };
         }
     }
