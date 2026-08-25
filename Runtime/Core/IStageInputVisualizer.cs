@@ -73,9 +73,9 @@ namespace FairyGUI
                 cursorSize = 32f,
                 cursorBorderWidth = 2f,
 
-                pressColor = new Color(0.1020f, 0.8745f, 0.9020f, 1f),
+                pressColor = new Color(0.1020f, 0.8745f, 0.9020f, 0.95f),
                 pressRingHoldRadius = 10f,
-                pressRingMaxRadius = 25f,
+                pressRingMaxRadius = 20f,
                 pressUpFadeSeconds = 0.5f,
 
                 lineWidth = 2f,
