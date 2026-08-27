@@ -1498,6 +1498,13 @@ namespace FairyGUI
         /// </summary>
         /// <param name="pt"></param>
         /// <returns></returns>
+        /// <remarks>
+        /// 契约警告(踩坑点): pivotAsAnchor 为真时, 本方法把「局部坐标系原点在 pivot 点」当前提,
+        /// 会先给 pt 加一次 (width*pivotX, height*pivotY)。若你手里的是以左上角为原点的量
+        /// (如 (width/2, height/2)、(0,0)、某子矩形的角点), 直接传进来会被多偏移一次 pivot,
+        /// 落点静默偏到控件外侧或相邻控件上 —— 不抛异常、不报错。此时应先减掉
+        /// (width*pivotX, height*pivotY) 再传。这个一行式陷阱已被独立重新写出过多次。
+        /// </remarks>
         public Vector2 LocalToGlobal(Vector2 pt)
         {
             if (_pivotAsAnchor)

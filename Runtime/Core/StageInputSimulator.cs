@@ -420,12 +420,20 @@ namespace FairyGUI
         }
 
         /// <summary>
-        /// 控件局部点的屏幕坐标。LocalToGlobal 给的是 Stage 坐标(Y 向下),
-        /// 屏幕坐标 Y 向上, 所以 screenY = stageHeight - stageY。
+        /// 控件局部点的屏幕坐标。localPoint 以控件左上角为原点(x∈[0,width]、y∈[0,height]) ——
+        /// 调用方自然是这么想的。而 GObject.LocalToGlobal 期望的是以 pivot 点为原点的坐标,
+        /// pivotAsAnchor 时两者差一个 (width*pivotX, height*pivotY); 这里替调用方补偿掉, 免得
+        /// 每个调用点自己记(记漏就静默把点投到控件外侧/相邻控件, 不报错)。
+        /// LocalToGlobal 给的是 Stage 坐标(Y 向下), 屏幕坐标 Y 向上, 所以 screenY = stageHeight - stageY。
         /// </summary>
         public static Vector2 ScreenPointOf(GObject obj, Vector2 localPoint)
         {
             if (obj == null) throw new ArgumentNullException("obj");
+            if (obj.pivotAsAnchor)
+            {
+                localPoint.x -= obj.width * obj.pivotX;
+                localPoint.y -= obj.height * obj.pivotY;
+            }
             Vector2 stagePos = obj.LocalToGlobal(localPoint);
             return new Vector2(stagePos.x, Stage.inst.size.y - stagePos.y);
         }
